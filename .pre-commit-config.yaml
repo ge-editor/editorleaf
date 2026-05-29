@@ -1,0 +1,66 @@
+repos:
+  - repo: meta
+    hooks:
+      - id: check-hooks-apply
+      - id: check-useless-excludes
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      # Block local replace in go.mod
+      - id: forbid-local-go-replace
+        name: Prevent local replace directives in go.mod
+        language: system
+        # ダブルクォートで囲み、内部のシングルクォートを安全に扱う
+        entry: "bash -c 'if grep -Eq \"^[[:space:]]*replace[[:space:]].*=>[[:space:]]*(/|\\.|~|[A-Za-z]:\\\\\\\\)\" go.mod; then echo \"ERROR: local replace directive found in go.mod\"; grep -En \"^[[:space:]]*replace[[:space:]].*=>[[:space:]]*(/|\\.|~|[A-Za-z]:\\\\\\\\)\" go.mod; exit 1; fi'"
+        files: ^go\.mod$
+
+      # Block go.work
+      - id: forbid-go-work
+        name: Prevent go.work commit
+        entry: go.work must not be committed
+        language: fail
+        files: ^go\.work$
+
+      # Block logs
+      - id: forbid-log-files
+        name: Prevent log file commit
+        entry: Log files must not be committed.
+        language: fail
+        files: '\.(log|out|trace)$'
+
+      # Block binaries
+      - id: forbid-binaries
+        name: Prevent executable/binary commit
+        entry: Binary files must not be committed.
+        language: fail
+        files: '^(dist/|bin/|build/|\.exe$|\.dll$|\.so$|\.dylib$|\.a$|\.o$)'
+
+      # Block SQLite/db
+      - id: forbid-db-files
+        name: Prevent database commit
+        entry: Database files must not be committed.
+        language: fail
+        files: '\.(db|sqlite|sqlite3)$'
+
+      # Block env/secrets
+      - id: forbid-secret-files
+        name: Prevent secret file commit
+        entry: Secret files must not be committed.
+        language: fail
+        files: '(\.env$|\.env\.|\.pem$|\.key$|\.p12$|\.pfx$|id_rsa$|id_ed25519$)'
+
+      # Block temp/editor junk
+      - id: forbid-temp-files
+        name: Prevent temp file commit
+        entry: Temporary files must not be committed.
+        language: fail
+        files: '(~$|\.tmp$|\.bak$|\.swp$|\.swo$)'

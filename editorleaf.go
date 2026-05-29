@@ -1,0 +1,1045 @@
+// Editor Struct implements the gecore.tree.Leaf interface
+
+package editorleaf
+
+import (
+	"bytes"
+	"fmt"
+
+	"github.com/gdamore/tcell/v3"
+
+	"github.com/ge-editor/editorleaf/buffer"
+	"github.com/ge-editor/editorleaf/editbuffer"
+	"github.com/ge-editor/editorleaf/mark"
+	"github.com/ge-editor/editorleaf/search"
+	"github.com/ge-editor/gecore"
+	"github.com/ge-editor/gecore/define"
+	"github.com/ge-editor/gecore/screen"
+	"github.com/ge-editor/gecore/tree"
+	"github.com/ge-editor/gelog"
+	"github.com/ge-editor/keychord"
+	"github.com/ge-editor/locale"
+	"github.com/ge-editor/theme"
+	"github.com/ge-editor/utils"
+)
+
+const (
+	verticalThreshold = 5
+)
+
+var (
+	// Initialization has been moved to the newEditor function
+	// BufferSets, _ = buffer.NewBufferSets(gecore.Files)
+	BufferSets *buffer.BufferSets
+	Marks      = mark.NewMarks()
+)
+
+func newEditorLeaf() *Editorleaf {
+	if BufferSets == nil {
+		var err error
+		BufferSets, err = buffer.NewBufferSets(gecore.Files)
+		if err != nil {
+			gelog.Error(err.Error())
+			gecore.Echo.AddText(err.Error()).JustNowActive(gecore.EchoRed)
+		}
+
+		// gelog.Info("CloseGuardManager.Register", "BufferSets", BufferSets)
+		gecore.QuitGuardManager.Register(NewQuitGuard(BufferSets), gecore.GuardWaitResolved)
+	}
+	e := &Editorleaf{
+		screen:     screen.Get(),
+		editBuffer: (*BufferSets)[0].EditBuffer,
+		meta:       (*BufferSets)[0].PopMeta(),
+		mode:       ModeEditor,
+		locale:     locale.New(),
+	}
+	e.bsArray = NewBoundariesArray(e)
+
+	return e
+}
+
+// Record the character width at the character's position on the screen in the map array.
+func (e *Editorleaf) setSpecialCharWidths(rowIndex, colIndex, width int) {
+	// Initialize map array
+	if e.specialCharWidths == nil {
+		// e.specialCharWidths = make([]map[int]int, len(*e.Rows()))
+		e.specialCharWidths = make([]map[int]int, (*e).editBuffer.RowsLength())
+	}
+
+	// Add the array size up to the row index
+	for len(e.specialCharWidths) <= rowIndex {
+		e.specialCharWidths = append(e.specialCharWidths, nil)
+	}
+
+	// Initialize index item of array to map
+	if e.specialCharWidths[rowIndex] == nil {
+		e.specialCharWidths[rowIndex] = make(map[int]int)
+	}
+
+	// Sets the character width for a row and column position
+	e.specialCharWidths[rowIndex][colIndex] = width
+}
+
+// ------------------------------------------------------------------
+// Editor implement gecore Leaf interface
+// ------------------------------------------------------------------
+
+// Editorleaf Struct implements the gecore.tree.Leaf interface
+type Editorleaf struct {
+	parentLeafType tree.LeafType
+	screen         *screen.Screen
+	active         bool
+
+	viewArea utils.Rect // include mode line
+	editArea utils.Rect
+
+	verticalThreshold int // Changes depending on screen size
+
+	editBuffer *editbuffer.EditBuffer
+	meta       *buffer.Meta
+
+	bsArray BoundariesArray // boundaries array of logical row
+
+	specialCharWidths []map[int]int // Tab width
+
+	mode Mode
+
+	keyDispatcher *keychord.RootNode
+
+	linenumberWidth int
+
+	locale locale.Locale // Locale interface
+}
+
+func (e *Editorleaf) SetKeyDispatcher(km *keychord.RootNode) {
+	e.keyDispatcher = km
+}
+
+func (e *Editorleaf) DispatchKey(ev tcell.EventKey) (string, keychord.KeyDispatchTransition) {
+	// gelog.Info("e.keyDispatcher")
+	if e.keyDispatcher == nil {
+		// gelog.Info("e.keyDispatcher == nil")
+		return "", keychord.DispatchNotFound
+	}
+
+	s, res := e.keyDispatcher.Dispatch(ev)
+	switch res {
+	case keychord.DispatchNotFound:
+		e.InsertString(ev.Str())
+	case keychord.DispatchPrefix:
+	case keychord.DispatchExecuted:
+	case keychord.DispatchInvalidAfterPrefix:
+	}
+
+	return s, res
+}
+
+// ------------------------------------------------------------------
+// Methods of gecore Leaf interface
+// ------------------------------------------------------------------
+
+func (e *Editorleaf) LeafType() tree.LeafType {
+	return e.parentLeafType
+}
+
+func (e *Editorleaf) Resize(viewArea utils.Rect) {
+	e.viewArea = viewArea
+	e.editArea = viewArea
+	if e.mode != ModeEditor {
+		e.verticalThreshold = 0
+	} else {
+		if !e.rightmost() {
+			e.editArea.Width -= 1 // right bar
+		}
+		e.editArea.Height -= 1 // status
+		e.verticalThreshold = utils.Threshold(verticalThreshold, e.editArea.Height)
+	}
+	e.bsArray.ClearAll()
+}
+
+func (e *Editorleaf) Draw() {
+	e.drawEditorleaf()
+	e.drawRightBar()
+}
+
+func (e *Editorleaf) Kill(leaf tree.Leaf, isActive bool) tree.Leaf {
+	killTargetBuf := e.editBuffer
+
+	var toReplace []*Editorleaf
+
+	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+		e, ok := l.(*Editorleaf)
+		if ok {
+			if e.editBuffer == killTargetBuf {
+				toReplace = append(toReplace, e)
+			}
+		}
+	})
+
+	// 該当するバッファを取り除く
+	BufferSets.RemoveByBufferFile(killTargetBuf)
+
+	var bufferSetsIndexForReplace int
+	l := len(*BufferSets)
+	if l == 0 {
+		// Create new bufferSet into BufferSets
+		eb, _, _, err := BufferSets.GetFileAndMeta("unnamed")
+		if err != nil {
+			gecore.Echo.AddText(err.Error())
+			return leaf
+		}
+		bufferSetsIndexForReplace = BufferSets.GetIndexByBufferFile(eb)
+	} else {
+		bufferSetsIndexForReplace = l - 1
+	}
+
+	for _, e := range toReplace {
+		e.editBuffer = (*BufferSets)[bufferSetsIndexForReplace].EditBuffer
+		e.meta = (*BufferSets)[bufferSetsIndexForReplace].PopMeta()
+	}
+
+	return leaf
+}
+
+func (e *Editorleaf) Active(a bool) {
+	e.active = a
+}
+
+func (e *Editorleaf) IsActive() bool {
+	return e.active
+}
+
+func (e *Editorleaf) Resume() {
+}
+
+func (e *Editorleaf) Init() {
+}
+
+func (e *Editorleaf) WillClose() {
+}
+
+func (e *Editorleaf) MinibufferMode(mode Mode) {
+	e.mode = mode
+}
+
+// *********************************************************
+
+// Return the index of the logical line that contains the specified column.
+func (e *Editorleaf) getIndexOfLogicalRow(rowIndex, colIndex int) (int, bool) {
+	l := e.bsArray.BoundariesLen(rowIndex)
+	for i := 0; i < l; i++ {
+		bo := e.bsArray.Boundary(rowIndex, i)
+		if colIndex >= bo.StartLogicalRowByteIndex && colIndex < bo.StopLogicalRowByteIndex {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// Check if the column index is within the last boundary of the specified row
+// Return false: out of index or not initialized.
+func (e *Editorleaf) inEndOfLogicalRow(rowIndex, colIndex int) bool {
+	lastBoundary := e.bsArray.LastBoundary(rowIndex)
+	return colIndex >= lastBoundary.StartLogicalRowByteIndex && colIndex < lastBoundary.StopLogicalRowByteIndex
+}
+
+// ------------------------------------------------------------------
+// SyncEditor
+// ------------------------------------------------------------------
+
+type syncType int
+
+const (
+	INSERT syncType = iota
+	DELETE
+)
+
+// syncEdits adjusts cursor positions and buffer boundaries based on the type of edit (insert or delete).
+func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbuffer.Cursor) {
+	// Ensure start is before end; swap if necessary.
+	if start.RowIndex > end.RowIndex || (start.RowIndex == end.RowIndex && start.ColIndex > end.ColIndex) {
+		start, end = end, start
+	}
+
+	// Synchronize cursor positions in the buffer sets associated with the edited file.
+	for _, buffSet := range *BufferSets {
+		// Skip if this buffer set is not linked to the file being edited.
+		if buffSet.EditBuffer != e.editBuffer {
+			continue
+		}
+
+		for _, meta := range buffSet.GetMetas() {
+			// Adjust cursor based on the type of edit.
+			switch sync {
+			case INSERT:
+				meta.Cursor.AdjustForInsertion(start, end)
+			case DELETE:
+				meta.Cursor.AdjustForDeletion(start, end)
+			}
+		}
+		break
+	}
+
+	// Synchronize cursor positions and buffer boundaries in other editors linked to the same file.
+	// leaves := tree.GetLeafTypeByRegisterName("editorleaf")
+	// for _, leaf := range leaves {
+	tree.GetRootTree().ForEachLeaf(func(leaf tree.Leaf) {
+		editor, ok := leaf.(*Editorleaf)
+		if ok {
+			// editor := leaf.(*Editorleaf)
+			// Skip if the editor is linked to a different file or is the current editor.
+			if editor.editBuffer != e.editBuffer {
+				return
+				// continue
+			}
+			// Adjust foundIndex that is results of search and replace
+			foundIndexes := editor.meta.Search.GetFindIndexes()
+			for i := 0; i < len(foundIndexes); i++ {
+				// gelog.Info("fc1 %v", foundIndexes[i])
+				switch sync {
+				case INSERT:
+					foundIndexes[i].Start.AdjustForInsertion(start, end)
+					foundIndexes[i].Stop.AdjustForInsertion(start, end)
+				case DELETE:
+					foundIndexes[i].Start.AdjustForDeletion(start, end)
+					foundIndexes[i].Stop.AdjustForDeletion(start, end)
+				}
+				// gelog.Info("fc2 %v", foundIndexes[i])
+			}
+			if editor == e {
+				return
+				// continue
+			}
+
+			switch sync {
+			case INSERT:
+				editor.meta.Cursor.AdjustForInsertion(start, end)
+				// Update buffer boundary array if rows were inserted.
+				if end.RowIndex-start.RowIndex > 0 {
+					editor.bsArray.Insert(start.RowIndex+1, end.RowIndex-(start.RowIndex+1))
+				}
+			case DELETE:
+				editor.meta.Cursor.AdjustForDeletion(start, end)
+				// Update buffer boundary array if rows were deleted.
+				if count := end.RowIndex - start.RowIndex; count > 0 {
+					editor.bsArray.Delete(start.RowIndex+1, count)
+				}
+			}
+		}
+	})
+}
+
+// ------------------------------------------------------------------
+//
+// ------------------------------------------------------------------
+
+func (e *Editorleaf) GetBuffers() *buffer.BufferSets {
+	return BufferSets
+}
+
+func (e *Editorleaf) GetBuffersFilterByCharacters(chars string) *buffer.BufferSets {
+	items := buffer.BufferSets{}
+	b := BufferSets
+	//gelog.Info("****** FilterByCharacters", "len", len(*m))
+	for i := len(*b) - 1; i >= 0; i-- {
+		mk := (*b)[i]
+		text := mk.GetBase()
+		/* 		if text == "*minibuffer*" {
+		   			continue
+		   		}
+		*/
+		if chars != "" {
+			if utils.ContainsAllCharacters(text, chars) {
+				items = append(items, mk)
+			}
+		} else {
+			items = append(items, mk)
+		}
+	}
+	//gelog.Info("FilterByCharacters", "chars", chars, "items", items)
+	//gelog.Info("FilterByCharacters", "chars", chars, "items", items)
+	return &items
+}
+
+// Convert rune to displaying string on mode line
+// Conversion target:
+//   - control code: ^X
+//   - newline code
+//
+// Line feed code is depending the editing buffer newline
+func (e *Editorleaf) RuneStatus(ch rune) string {
+	str := ""
+	if ch == define.DEL { // DEL
+		str = `^?`
+	} else if ch == '\t' {
+		str = `\t`
+	} else if ch == define.LF {
+		switch e.editBuffer.GetNewLine() {
+		case editbuffer.NewlineTypeLF:
+			str = `\n`
+		case editbuffer.NewlineTypeCRLF:
+			str = `\r\n`
+		case editbuffer.NewlineTypeCR:
+			str = `\r`
+		default:
+			return "UNKNOWN"
+		}
+	} else if ch < 32 {
+		str = fmt.Sprintf("^%c", ch+64)
+	} else {
+		str = string(ch)
+	}
+	return str
+}
+
+// Use Editor.editArea as relative coordinates
+func (e *Editorleaf) showCursor(x, y int) {
+	i := e.logicalLineIndex(e.meta.RowIndex, e.meta.ColIndex)
+	hangingIndentWidth := 0
+	if i > 0 {
+		hangingIndentWidth = e.bsArray.GetHangingIndentWidth(e.meta.RowIndex)
+	}
+	if e.active {
+		e.screen.ShowCursor(e.editArea.X+x+e.linenumberWidth+hangingIndentWidth, e.editArea.Y+y)
+	}
+}
+
+// Editor.editArea as relative coordinates
+func (e *Editorleaf) setCellInEditArea(x, y int, style tcell.Style, ch rune, chWidth int) {
+	if y < 0 || x < 0 || y >= e.editArea.Height || x >= e.editArea.Width {
+		return
+	}
+
+	e.screen.SetContent(x+e.editArea.X+e.linenumberWidth, y+e.editArea.Y, ch, nil, style)
+	for i := 1; i < chWidth; i++ {
+		e.screen.SetContent(x+e.editArea.X+i+e.linenumberWidth, y+e.editArea.Y, 0, nil, style)
+	}
+}
+
+// Editor.editArea as relative coordinates
+func (e *Editorleaf) fillInEditArea(rect utils.Rect, r rune, style tcell.Style) {
+	if rect.Y < 0 || rect.Y >= e.editArea.Height ||
+		rect.X < 0 || rect.X >= e.editArea.Width {
+		return
+	}
+
+	rect.X += e.editArea.X + e.linenumberWidth
+	rect.Y += e.editArea.Y
+	e.screen.FillRect(rect, r, style)
+}
+
+// Returns bool whether it is the rightmost view
+func (e *Editorleaf) rightmost() bool {
+	// return e.viewArea.X+e.viewArea.Width >= e.screen.Width
+	// linenumber を表示するため右端の境界線不要
+	return true
+}
+
+func (e *Editorleaf) drawRightBar() {
+	if e.rightmost() || e.mode != ModeEditor {
+		return
+	}
+
+	x := e.viewArea.X + e.viewArea.Width - 1
+	for y := e.viewArea.Y; y < e.viewArea.Y+e.viewArea.Height-1; y++ {
+		e.screen.SetContent(x, y, ' ', nil, theme.ColorRightbar)
+	}
+}
+
+// Draw the screen based on Editor.currentRowIndex, logical row position logicalCY, and cursor position Editor.Cy
+func (e *Editorleaf) drawEditorleaf() {
+
+	if e.mode == ModeEditor {
+		// 行数が変わったら呼び出す
+		// ひとまずここで呼び出すこととする
+		e.linenumberWidth = digitsScreenWidth(e.RowsLength()) + 1
+	} else {
+		e.linenumberWidth = 0
+	}
+
+	foundPositionIndexes := e.meta.Search.Indexes
+	foundPositionIndex := -1
+
+	Width, Height := e.editArea.Width, e.editArea.Height
+
+	// Cursor position in draw view
+	_, Cy := e.meta.Cx, e.meta.Cy // ...
+
+	// Cursor position in logical row
+	e.drawLineWithCompute(0, e.meta.RowIndex, -1, false, foundPositionIndex, foundPositionIndexes) // 最終的にこの呼び出しは不要になる
+	Lcx, Lcy := e.cursorPositionOnScreenLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+	// gecore.Echo.AddText(fmt.Sprintf("(Lcy,Lcx:%d,%d)", Lcy, Lcx))
+
+	totalLogicalRowIfInHeight := 0
+	totalRowAboveCursor := -1
+	isAll := false
+	if e.meta.RowIndex <= Height || e.editBuffer.RowsLength() <= Height {
+		isAll = true
+		for rowIndex := 0; rowIndex < e.editBuffer.RowsLength(); rowIndex++ {
+			if rowIndex == e.meta.RowIndex {
+				totalRowAboveCursor = totalLogicalRowIfInHeight + Lcy
+			}
+
+			e.drawLineWithCompute(0, rowIndex, -1, false, foundPositionIndex, foundPositionIndexes) // 最終的にこの呼び出しは不要になる
+			totalLogicalRowIfInHeight += e.bsArray.BoundariesLen(rowIndex)
+
+			if totalLogicalRowIfInHeight > Height {
+				totalLogicalRowIfInHeight = -1
+				isAll = false
+				break
+			}
+		}
+	}
+
+	if isAll {
+		// 1行目よりも上に隙間ができないように補正
+		Cy = totalRowAboveCursor
+		e.meta.StartDrawRowIndex = 0
+		e.meta.StartDrawLogicalIndex = 0
+	} else {
+		// cursor is below verticalThreshold
+		// gecore.Echo.AddText(fmt.Sprintf("(totalRowAboveCursor:%d, Height:%d, Threshold:%d)", totalRowAboveCursor, Height, e.verticalThreshold))
+		if Cy >= Height-e.verticalThreshold {
+			Cy = Height - e.verticalThreshold - 1
+			// gecore.Echo.AddText(fmt.Sprintf("(Cy:%d)", Cy))
+		}
+
+		// cursor is above verticalThreshold
+		if Cy < e.verticalThreshold {
+			Cy = e.verticalThreshold
+		}
+
+		if totalRowAboveCursor >= 0 && Cy > totalRowAboveCursor {
+			Cy = totalRowAboveCursor
+		}
+
+	}
+	// gecore.Echo.AddText(fmt.Sprintf("(Cy,Cx:%d,%d)", Cy, Cx))
+
+	// Cursor row
+	rowIndex := e.meta.RowIndex
+	y := Cy - Lcy
+	// gecore.Echo.AddText(fmt.Sprintf("(rowIndex:%d, y:%d)", rowIndex, y))
+	e.drawLineWithCompute(y, rowIndex, Lcy, true, -1, foundPositionIndexes)
+
+	// From the cursor position to up
+	rowIndex--
+	for ; rowIndex >= 0 && y >= 0; rowIndex-- {
+		e.drawLineWithCompute(y, rowIndex, -1, false, -1, foundPositionIndexes) // 最終的にこの呼び出しは不要になる
+		y -= e.bsArray.BoundariesLen(rowIndex)
+		e.drawLineWithCompute(y, rowIndex, -1, true, -1, foundPositionIndexes)
+	}
+
+	// From the cursor position to down
+	rowIndex = e.meta.RowIndex
+	y = Cy + (e.bsArray.BoundariesLen(rowIndex) - Lcy)
+	rowIndex++
+	for ; rowIndex < e.RowsLength() && y < Height; rowIndex++ {
+		e.drawLineWithCompute(y, rowIndex, -1, true, -1, foundPositionIndexes)
+		y += e.bsArray.BoundariesLen(rowIndex)
+	}
+
+	///////////////////////////////////////
+
+	// clear remaining area
+	h := Height - y
+	if h > 0 {
+		e.fillInEditArea(utils.Rect{X: 0, Y: y, Width: Width, Height: h}, 0, theme.ColorDefault)
+	}
+
+	///////////////////////////////////////
+
+	e.meta.Cx, e.meta.Cy = Lcx, Cy
+	// hangingIndentWidth := e.bsArray.GetHangingIndentWidth(rowIndex)
+	e.showCursor(e.meta.Cx, e.meta.Cy)
+
+	// Calculate the number of cursor digits to display on the mode line
+	e.meta.ModelineCx = Lcx + 1
+	for i := 0; i < Lcy; i++ {
+		e.meta.ModelineCx += e.bsArray.Boundary(e.meta.RowIndex, i).LogicalRowWidth
+	}
+	e.drawModeline()
+	// e.screen.Echo(fmt.Sprintf("line: %d:%d-%d", e.StartDrawRowIndex, e.StartDrawLogicalIndex, e.EndDrawRowIndex))
+}
+
+// isCursorInRange checks if the cursor position (row, col) is within the range
+// defined by the top-left (row1, col1) and bottom-right (row2, col2) corners.
+// It returns:
+//
+//	-1 if the cursor is before the range,
+//	 1 if the cursor is after the range,
+//	 0 if the cursor is within the range.
+func isCursorInRange(row, col, row1, col1, row2, col2 int) int {
+	// Handle cases where the range is reversed (either vertically or horizontally)
+	if row1 > row2 {
+		row1, row2 = row2, row1
+		col1, col2 = col2, col1
+	} else if row1 == row2 && col1 > col2 {
+		col1, col2 = col2, col1
+	}
+
+	// If the row is outside the range, return false
+	if row < row1 {
+		return -1
+	}
+	if row > row2 {
+		return 1
+	}
+
+	// If the range is within a single row (row1 == row2)
+	if row1 == row2 {
+		if col < col1 {
+			return -1
+		}
+		if col >= col2 {
+			return 1
+		}
+		return 0
+	}
+
+	// If the cursor is on the starting row (row == row1), check the column range
+	if row == row1 {
+		if col < col1 {
+			return -1
+		}
+		return 0
+	}
+
+	// If the cursor is on the ending row (row == row2), check the column range
+	if row == row2 {
+		if col >= col2 {
+			return 1
+		}
+		return 0
+	}
+
+	// If the cursor is on a row between the starting and ending rows,
+	// it is always within the range
+	return 0
+}
+
+// 10進数で何桁か
+func digitsScreenWidth(n int) int {
+	if n == 0 {
+		return 1
+	}
+	if n < 0 {
+		n = -n
+	}
+	count := 0
+	for n > 0 {
+		n /= 10
+		count++
+	}
+	return count
+}
+
+// indent and bullet
+// return indentWidth, utils.RuneWidth(r) + 1, false
+func (e *Editorleaf) detectHangingIndent(rowIndex int) (int, int, bool) {
+	indentWidth := 0
+
+	lines := e.editBuffer.Rows()
+	rowBytes := lines.Row(rowIndex).Length()
+
+	colIndex := 0
+	totalCellWidthForTab := 0
+	bytePosOfRow := 0
+	for bytePosOfRow < rowBytes {
+		r, size, ok := lines.Row(rowIndex).DecodeRune(bytePosOfRow)
+		if !ok {
+			return 0, 0, false
+		}
+
+		width := 0
+		if r == '\t' {
+			width = utils.TabWidth(totalCellWidthForTab, e.editBuffer.GetTabWidth())
+		} else if r == ' ' {
+			width = utils.RuneWidth(r)
+		} else {
+			break
+		}
+
+		totalCellWidthForTab += width
+		bytePosOfRow += size
+		colIndex++
+		indentWidth += width
+	}
+
+	//gelog.Info("a", e.locale)
+	//gelog.Info("b", e.locale.Bullets())
+	for _, b := range e.locale.Bullets() {
+		if bytes.HasPrefix(lines.Row(rowIndex).Bytes()[bytePosOfRow:], b.Marker) {
+			return indentWidth, b.Width, true
+		}
+	}
+
+	return indentWidth, 0, false
+}
+
+// compute boundary of rowIndex
+// draw one row
+//   - n: y position within the Leaf to draw the row
+//   - cursorLogicalCY: Logical row number where the cursor is located,
+//     If the row to draw is not the cursor row, set -1 and call
+func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY int,
+	isDraw bool,
+	foundPositionIndex int, foundIndexes []search.FoundPosition,
+) int {
+
+	contentWidth := e.editArea.Width - e.linenumberWidth
+
+	sy, sx := startScreenY, 0
+	var prevPrevCell, prevCell, currentCell locale.Cell // ★★
+	var prevRune1, prevRune2 rune                       // 表示する文字(currentRune1,currentRune2)の1個前の文字, Controlcode の場合は "^", "X" // ★
+	var breakpoint Boundary
+	lines := e.editBuffer.Rows()
+	isEndOfRow := rowIndex == (*lines).Length()-1
+	rowBytes := lines.Row(rowIndex).Length()
+	totalCellWidthForTab := 0 // for compute tab stop
+
+	bo := []Boundary{}
+	startLogicalRowByteIndex := 0 // 論理行の開始 byte index
+
+	// Hanging indentation
+	indentWidth, bulletWidth, _ := e.detectHangingIndent(rowIndex)
+	hangingIndentWidth := indentWidth + bulletWidth
+
+	//
+	cursorLineY := -1
+	if rowIndex == e.meta.RowIndex {
+		cursorLineY = cursorLogicalCY + startScreenY
+	}
+	isUnderline := func() bool {
+		return sy == cursorLineY
+	}
+
+	for bytePosOfRow := 0; bytePosOfRow < rowBytes; {
+		wrapped := false
+		currentCell.Style = theme.ColorDefault
+
+		isLastCh := bytePosOfRow == rowBytes-1
+		var currentRune1, currentRune2 rune // 表示する文字, Controlcode の場合は "^", "X"
+		var ok bool
+		currentRune1, currentCell.Size, ok = lines.Row(rowIndex).DecodeRune(bytePosOfRow)
+		if !ok {
+			panic(fmt.Sprintf("%d '%s'", rowIndex, string((*lines)[rowIndex])))
+		}
+		currentCell.Width = utils.RuneWidth(currentRune1)
+		currentCell.Class = e.locale.GetCharClass(currentRune1)
+
+		// Special char width
+		if currentRune1 == define.EOF && isLastCh && isEndOfRow {
+			currentRune1 = theme.MarkEOF
+			currentCell.Width = 1 // End of file
+			currentCell.Style = theme.ColorMarkEOF
+		} else if currentRune1 == '\t' {
+			currentRune1 = theme.MarkTab
+			currentCell.Width = utils.TabWidth(totalCellWidthForTab, e.editBuffer.GetTabWidth())
+			currentCell.Style = theme.ColorTab
+			e.setSpecialCharWidths(rowIndex, bytePosOfRow, currentCell.Width)
+		} else if currentRune1 == define.LF {
+			currentRune1 = theme.MarkNewline
+			currentCell.Style = theme.ColorMarkNewline
+		} else if locale.Is(currentCell, locale.CONTROLCODE) {
+			currentRune2 = currentRune1 + 64
+			currentRune1 = '^'
+			currentCell.Width = 2 // ^X
+			currentCell.Style = theme.ColorControlCode
+		}
+
+		// Is index in the found word
+		if foundPositionIndex >= 0 && foundPositionIndex < len(foundIndexes) {
+			u := isCursorInRange(rowIndex, bytePosOfRow,
+				foundIndexes[foundPositionIndex].Start.RowIndex, foundIndexes[foundPositionIndex].Start.ColIndex,
+				foundIndexes[foundPositionIndex].Stop.RowIndex, foundIndexes[foundPositionIndex].Stop.ColIndex)
+
+			if u == 0 {
+				if isCursorInRange(e.meta.RowIndex, e.meta.ColIndex,
+					foundIndexes[foundPositionIndex].Start.RowIndex, foundIndexes[foundPositionIndex].Start.ColIndex,
+					foundIndexes[foundPositionIndex].Stop.RowIndex, foundIndexes[foundPositionIndex].Stop.ColIndex) == 0 {
+					currentCell.Style = theme.ColorSearchFoundOnCursor
+				} else {
+					currentCell.Style = theme.ColorFind
+				}
+			} else if u == 1 {
+				foundPositionIndex++
+			}
+		}
+		currentCell.Style = currentCell.Style.Underline(isUnderline())
+
+		if sx+currentCell.Width >= contentWidth-8 && locale.IsBreakpoint(prevPrevCell, prevCell, currentCell) { // ★★
+			breakpoint = Boundary{
+				StartLogicalRowByteIndex: startLogicalRowByteIndex,
+				StopLogicalRowByteIndex:  bytePosOfRow,
+				LogicalRowWidth:          sx,
+				TotalCellWidth:           totalCellWidthForTab,
+			}
+		}
+
+		// 論理行末には必ず記号が追加される: -, LF, EOF
+		if sx+currentCell.Width >= contentWidth {
+			if isLastCh {
+				// rune is LF or EOF
+				bo = append(bo, Boundary{
+					StartLogicalRowByteIndex: startLogicalRowByteIndex,
+					StopLogicalRowByteIndex:  bytePosOfRow + currentCell.Size,
+					LogicalRowWidth:          sx + currentCell.Width,
+					TotalCellWidth:           totalCellWidthForTab + currentCell.Width,
+				})
+				if isDraw {
+					e.setCellInEditArea(sx, sy, currentCell.Style, currentRune1, currentCell.Width)
+					e.fillInEditArea(utils.Rect{X: sx + currentCell.Width, Y: sy,
+						Width: contentWidth - (sx + currentCell.Width), Height: 1},
+						0, theme.ColorDefault.Underline(isUnderline()))
+				}
+			} else if breakpoint.IsEmpty() {
+				// 論理行末が tab の場合 tab width を縮める
+				/* if currentRune1 == '\t' && contentWidth-sx > 1 {
+					bo = append(bo, Boundary{
+						StartLogicalRowByteIndex: startLogicalRowByteIndex,
+						StopLogicalRowByteIndex:  bytePosOfRow,
+						LogicalRowWidth:          sx,
+						TotalCellWidth:           totalCellWidthForTab,
+					})
+					startLogicalRowByteIndex = bytePosOfRow
+					if draw {
+						tmpWidth := contentWidth - sx - 1
+						e.setCell(sx, sy, currentCell.Style, currentRune1, tmpWidth)
+						e.setCell(sx+tmpWidth, sy, theme.ColorMarkContinue.Underline(isUnderline()), theme.MarkContinue, 1)
+					}
+					sy++
+					sx = 0
+				} else */
+				if locale.Is(currentCell, locale.PROHIBITED) {
+					// 折り返した直後が禁則文字だった場合の処理
+					// currentCell は次の論理行頭だが、禁則文字だった場合
+					bo = append(bo, Boundary{
+						StartLogicalRowByteIndex: startLogicalRowByteIndex,
+						StopLogicalRowByteIndex:  bytePosOfRow - prevCell.Size, // 直前の文字の前
+						LogicalRowWidth:          sx - prevCell.Width,
+						TotalCellWidth:           totalCellWidthForTab - prevCell.Width,
+					})
+					startLogicalRowByteIndex = bytePosOfRow - prevCell.Size // 次の論理行開始位置 byte index
+					if isDraw {
+						e.fillInEditArea(utils.Rect{X: sx - prevCell.Width, Y: sy,
+							Width: contentWidth - (sx - prevCell.Width), Height: 1},
+							0, theme.ColorDefault.Underline(isUnderline()))
+						e.setCellInEditArea(sx-prevCell.Width, sy, theme.ColorMarkContinue.Underline(isUnderline()), theme.MarkContinue, 1)
+					}
+					// Next logical row
+					sy++
+					sx = 0 + hangingIndentWidth
+					wrapped = true
+					if isDraw {
+						s := prevCell.Style //.Underline(isUnderline())
+						if locale.Is(prevCell, locale.CONTROLCODE) {
+							e.setCellInEditArea(sx, sy, s, prevRune1, 1)   // ★
+							e.setCellInEditArea(sx+1, sy, s, prevRune2, 1) // ★
+						} else {
+							e.setCellInEditArea(sx, sy, s, prevRune1, prevCell.Width) // ★
+						}
+						sx += prevCell.Width
+						s = currentCell.Style                           //.Underline(isUnderline()) // ★★
+						if locale.Is(currentCell, locale.CONTROLCODE) { // ★★
+							e.setCellInEditArea(sx, sy, s, currentRune1, 1)
+							e.setCellInEditArea(sx+1, sy, s, currentRune2, 1)
+						} else {
+							e.setCellInEditArea(sx, sy, s, currentRune1, currentCell.Width) // ★★
+						}
+					}
+				} else {
+					bo = append(bo, Boundary{
+						StartLogicalRowByteIndex: startLogicalRowByteIndex,
+						StopLogicalRowByteIndex:  bytePosOfRow,
+						LogicalRowWidth:          sx,
+						TotalCellWidth:           totalCellWidthForTab,
+					})
+					startLogicalRowByteIndex = bytePosOfRow
+					if isDraw {
+						e.setCellInEditArea(sx, sy, theme.ColorMarkContinue.Underline(isUnderline()), theme.MarkContinue, 1)
+						e.fillInEditArea(utils.Rect{X: sx + 1, Y: sy,
+							Width: contentWidth - (sx + 1), Height: 1},
+							0, theme.ColorDefault.Underline(isUnderline()))
+					}
+					sy++
+					sx = 0 + hangingIndentWidth
+					wrapped = true
+					if isDraw {
+						currentCell.Style = currentCell.Style.Underline(isUnderline()) // ★★
+						if locale.Is(currentCell, locale.CONTROLCODE) {                // ★★
+							e.setCellInEditArea(sx, sy, currentCell.Style, currentRune1, 1)   // ★★
+							e.setCellInEditArea(sx+1, sy, currentCell.Style, currentRune2, 1) // ★★
+						} else {
+							e.setCellInEditArea(sx, sy, currentCell.Style, currentRune1, currentCell.Width) // ★★
+						}
+					}
+				}
+			} else { // breakpoint is exists
+				bo = append(bo, breakpoint)
+				startLogicalRowByteIndex = breakpoint.StopLogicalRowByteIndex
+
+				bytePosOfRow = breakpoint.StopLogicalRowByteIndex
+				sx = breakpoint.LogicalRowWidth
+				// totalCellWidthForTab = breakpoint.TotalWidth
+				if isDraw {
+					e.setCellInEditArea(sx, sy, theme.ColorMarkContinue.Underline(isUnderline()), theme.MarkContinue, 1)
+					e.fillInEditArea(utils.Rect{X: sx + 1, Y: sy,
+						Width: contentWidth - (sx + 1), Height: 1},
+						0, theme.ColorDefault.Underline(isUnderline()))
+				}
+				sy++
+				sx = 0 + hangingIndentWidth
+				wrapped = true
+				//
+				breakpoint.Clear()
+				prevPrevCell.Clear() // ★★
+				prevCell.Clear()     // ★★
+				currentCell.Clear()  // ★★
+				// continue          // ! --------------------
+			}
+		} else { // if sx+currentCell.Width < contentWidth
+			if isDraw {
+				e.setCellInEditArea(sx, sy, currentCell.Style, currentRune1, currentCell.Width) // ★★
+			}
+			if isLastCh {
+				bo = append(bo, Boundary{
+					StartLogicalRowByteIndex: startLogicalRowByteIndex,
+					StopLogicalRowByteIndex:  bytePosOfRow + currentCell.Size,          // ★★
+					LogicalRowWidth:          sx + currentCell.Width,                   // ★★
+					TotalCellWidth:           totalCellWidthForTab + currentCell.Width, // ★★
+				})
+				if isDraw {
+					e.fillInEditArea(utils.Rect{X: sx + currentCell.Width, Y: sy, // ★★
+						Width:  contentWidth - (sx + currentCell.Width), // ★★
+						Height: 1},
+						0, theme.ColorDefault.Underline(isUnderline()))
+				}
+				sy++
+			}
+		}
+
+		// -- tail of loop --
+
+		// Fill Hanging Indent Width
+		// if isDraw && wrapped && hangingIndentWidth > 0 {
+		if isDraw && wrapped && hangingIndentWidth > 0 {
+			e.fillInEditArea(utils.Rect{X: 0, Y: sy,
+				Width:  hangingIndentWidth,
+				Height: 1},
+				0, theme.ColorDefault.Underline(isUnderline()))
+			wrapped = false
+		}
+
+		prevPrevCell = prevCell // ★★
+		prevCell = currentCell  // ★★
+
+		prevRune1 = currentRune1 // ★
+		prevRune2 = currentRune2 // ★
+
+		sx += currentCell.Width
+		totalCellWidthForTab += currentCell.Width
+		bytePosOfRow += currentCell.Size
+	}
+
+	// Linenumber
+	if isDraw && e.mode != ModeMinibuffer {
+		if /* startScreenY >= 0 && */ e.linenumberWidth > 0 {
+			y := e.editArea.Y + startScreenY
+			h := len(bo)
+			if startScreenY < 0 {
+				y = e.editArea.Y
+				h += startScreenY
+			}
+			e.screen.FillRect(utils.Rect{X: e.editArea.X, Y: y,
+				Width:  e.linenumberWidth,
+				Height: h},
+				0, theme.ColorLinenumber)
+
+			// Underline on linenumber area
+			if cursorLineY != -1 {
+				e.screen.FillRect(utils.Rect{X: e.editArea.X, Y: e.editArea.Y + cursorLineY,
+					Width:  e.linenumberWidth,
+					Height: 1},
+					0, theme.ColorLinenumber.Underline(true))
+			}
+		}
+
+		// Number
+		if startScreenY >= 0 && startScreenY < e.editArea.Height {
+			style := theme.ColorLinenumber
+			if startScreenY == cursorLineY {
+				style = style.Underline(true)
+			}
+			e.drawLinenumber(rowIndex+1, e.linenumberWidth-2+e.editArea.X, startScreenY, style)
+		}
+	}
+
+	//
+	e.bsArray.Set(rowIndex, bo, hangingIndentWidth)
+	return sy - startScreenY
+}
+
+func (e *Editorleaf) drawLinenumber(n int, x, y int, style tcell.Style) {
+	for n > 0 {
+		d := n % 10
+		e.screen.SetContent(x, y+e.editArea.Y, rune('0'+d), nil, style)
+		n /= 10
+		x--
+	}
+}
+
+// Returns the screen position of the cursor corresponding to the specified column index in logical rows.
+func (e *Editorleaf) cursorPositionOnScreenLogicalRow(rowIndex, colIndex int) (lx, ly int) {
+	if rowIndex >= e.bsArray.Len() {
+		// gelog.Info("lx,ly %d,%d", -1, -1)
+		return -1, -1
+	}
+	for ly = 0; ly < e.bsArray.BoundariesLen(rowIndex); ly++ {
+		if colIndex >= e.bsArray.Boundary(rowIndex, ly).StartLogicalRowByteIndex && colIndex < e.bsArray.Boundary(rowIndex, ly).StopLogicalRowByteIndex {
+			for i := e.bsArray.Boundary(rowIndex, ly).StartLogicalRowByteIndex; i < colIndex; {
+				// ch, size, ok := e.Rows().DecodeRune(rowIndex, i)
+				ch, size, ok := (*e).editBuffer.Rows().Row(rowIndex).DecodeRune(i)
+				if !ok {
+					break
+				}
+				w, _ := e.runeWidth(ch, rowIndex, i)
+				lx += w
+				i += size
+			}
+			//gelog.Info("cx,cy %d,%d", cx, cy)
+			return lx, ly
+		}
+	}
+	// gelog.Info("lx,ly %d,%d", -1, -1)
+	return -1, -1 // overflow
+}
+
+// colIndex が rowIndex 行の何番目の論理行上か調べる
+func (e *Editorleaf) logicalLineIndex(rowIndex, colIndex int) int {
+	if rowIndex >= e.bsArray.Len() {
+		return -1
+	}
+
+	for ly := 0; ly < e.bsArray.BoundariesLen(rowIndex); ly++ {
+		if colIndex >= e.bsArray.Boundary(rowIndex, ly).StartLogicalRowByteIndex && colIndex < e.bsArray.Boundary(rowIndex, ly).StopLogicalRowByteIndex {
+			return ly
+		}
+	}
+
+	return -1
+}
+
+func (e *Editorleaf) runeWidth(ch rune, rowIndex, colIndex int) (w int, ok bool) {
+	if ch == '\t' {
+		w, ok = e.specialCharWidths[rowIndex][colIndex]
+		if !ok {
+			gecore.Echo.AddText(fmt.Sprintf("Not found tab width row:%d, col:%d", rowIndex, colIndex))
+			return 0, false
+		}
+		// e.screen.Echo(fmt.Sprintf("tab width %d:%d %d", rowIndex, colIndex, w))
+	} else {
+		w = utils.RuneWidth(ch)
+	}
+	return w, true
+}

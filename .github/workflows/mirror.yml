@@ -1,0 +1,33 @@
+name: Mirror to Codeberg
+
+on:
+  push:
+    branches:
+      - '**'
+    tags:
+      - '*'
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure remote
+        run: |
+          git remote add codeberg \
+          https://${{ secrets.CODEBERG_TOKEN }}@codeberg.org/ge-editor/editorleaf.git
+
+      - name: Push mirror (retry)
+        run: |
+          for i in {1..3}; do
+            git push --mirror codeberg && break
+            echo "Retry $i..."
+            sleep 15
+          done
