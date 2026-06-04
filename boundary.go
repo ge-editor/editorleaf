@@ -6,6 +6,8 @@ import (
 
 	"github.com/ge-editor/editorleaf/search"
 	"github.com/ge-editor/gecore"
+	"github.com/ge-editor/locale"
+	"github.com/ge-editor/utils"
 )
 
 // Boundary represents a single wrapped logical row segment
@@ -54,6 +56,8 @@ type RowLayout struct {
 	// HangingIndentWidth is the indentation width applied to
 	// wrapped logical rows after the first one.
 	HangingIndentWidth int
+
+	RuneWidthCache []locale.Cell
 }
 
 // ------------------------------------------------------------------
@@ -85,14 +89,17 @@ func (b *BoundariesArray) Len() int {
 // It overwrites any existing layout data for the row.
 func (b *BoundariesArray) Set(
 	rowIndex int,
-	boundaries []Boundary,
+	boundaries []Boundary, // index is logical row number
 	hangingIndentWidth int,
+	runeWidths []locale.Cell, // index is rowIndex byte position
 ) {
-	b.ensureSize(rowIndex)
+	// b.ensureSize(rowIndex)
+	utils.EnsureSize(&b.rows, rowIndex)
 
 	b.rows[rowIndex] = RowLayout{
 		Boundaries:         boundaries,
 		HangingIndentWidth: hangingIndentWidth,
+		RuneWidthCache:     runeWidths,
 	}
 }
 
@@ -188,24 +195,28 @@ func (b *BoundariesArray) beAvailable(rowIndex int) {
 // ------------------------------------------------------------------
 // Internal helpers
 
-// ensureSize expands the internal slice so that rowIndex
+/*
+	// ensureSize expands the internal slice so that rowIndex
+
 // becomes addressable.
-func (b *BoundariesArray) ensureSize(rowIndex int) {
-	if rowIndex < len(b.rows) {
-		return
-	}
 
-	newSize := rowIndex + 1
-
-	if newSize > cap(b.rows) {
-		newCap := cap(b.rows) * 2
-		if newCap < newSize {
-			newCap = newSize
+	func (b *BoundariesArray) ensureSize(rowIndex int) {
+		if rowIndex < len(b.rows) {
+			return
 		}
-		newSlice := make([]RowLayout, newSize, newCap)
-		copy(newSlice, b.rows)
-		b.rows = newSlice
-	} else {
-		b.rows = b.rows[:newSize]
+
+		newSize := rowIndex + 1
+
+		if newSize > cap(b.rows) {
+			newCap := cap(b.rows) * 2
+			if newCap < newSize {
+				newCap = newSize
+			}
+			newSlice := make([]RowLayout, newSize, newCap)
+			copy(newSlice, b.rows)
+			b.rows = newSlice
+		} else {
+			b.rows = b.rows[:newSize]
+		}
 	}
-}
+*/
