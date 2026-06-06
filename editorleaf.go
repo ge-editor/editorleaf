@@ -82,7 +82,7 @@ type Editorleaf struct {
 
 	keyDispatcher *keychord.RootNode
 
-	linenumberWidth int
+	lineNumberWidth int
 
 	locale locale.Locale // Locale interface
 }
@@ -357,7 +357,7 @@ func (e *Editorleaf) showCursor(x, y int) {
 		hangingIndentWidth = e.bsArray.GetHangingIndentWidth(e.meta.RowIndex)
 	}
 	if e.active {
-		e.screen.ShowCursor(e.editArea.X+x+e.linenumberWidth+hangingIndentWidth, e.editArea.Y+y)
+		e.screen.ShowCursor(e.editArea.X+x+e.lineNumberWidth+hangingIndentWidth, e.editArea.Y+y)
 	}
 }
 
@@ -369,14 +369,11 @@ func (e *Editorleaf) setCellInEditArea(x, y int, style tcell.Style, ch rune, chW
 
 	columnLimit := 80 // language package で定義する
 
-	px := x + e.editArea.X
-
-	if px >= columnLimit || (chWidth > 1 && px == columnLimit-1) {
-		// style = theme.ColorColumnLimitOverflow
+	if x >= columnLimit || (chWidth > 1 && x == columnLimit-1) {
 		style = style.Background(theme.ColorColumnLimitOverflowBackground)
 	}
 
-	px += e.linenumberWidth
+	px := x + e.editArea.X + e.lineNumberWidth
 
 	e.screen.SetContent(px, y+e.editArea.Y, ch, nil, style)
 	for i := 1; i < chWidth; i++ {
@@ -399,7 +396,7 @@ func (e *Editorleaf) fillInEditArea(
 	const columnLimit = 80
 
 	// screen absolute position
-	screenX := rect.X + e.editArea.X + e.linenumberWidth
+	screenX := rect.X + e.editArea.X + e.lineNumberWidth
 	screenY := rect.Y + e.editArea.Y
 
 	// overflowStyle := theme.ColorColumnLimitOverflow
@@ -445,7 +442,7 @@ func (e *Editorleaf) fillInEditArea_1(rect utils.Rect, r rune, style tcell.Style
 		return
 	}
 
-	rect.X += e.editArea.X + e.linenumberWidth
+	rect.X += e.editArea.X + e.lineNumberWidth
 	rect.Y += e.editArea.Y
 	e.screen.FillRect(rect, r, style)
 }
@@ -453,7 +450,7 @@ func (e *Editorleaf) fillInEditArea_1(rect utils.Rect, r rune, style tcell.Style
 // Returns bool whether it is the rightmost view
 func (e *Editorleaf) rightmost() bool {
 	// return e.viewArea.X+e.viewArea.Width >= e.screen.Width
-	// linenumber を表示するため右端の境界線不要
+	// line number を表示するため右端の境界線不要
 	return true
 }
 
@@ -474,9 +471,9 @@ func (e *Editorleaf) drawEditorleaf() {
 	if e.mode == ModeEditor {
 		// 行数が変わったら呼び出す
 		// ひとまずここで呼び出すこととする
-		e.linenumberWidth = digitsScreenWidth(e.RowsLength()) + 1
+		e.lineNumberWidth = digitsScreenWidth(e.RowsLength()) + 1
 	} else {
-		e.linenumberWidth = 0
+		e.lineNumberWidth = 0
 	}
 
 	foundPositionIndexes := e.meta.Search.Indexes
@@ -688,8 +685,6 @@ func (e *Editorleaf) detectHangingIndent(rowIndex int) (int, int, bool) {
 		indentWidth += width
 	}
 
-	//gelog.Info("a", e.locale)
-	//gelog.Info("b", e.locale.Bullets())
 	for _, b := range e.locale.Bullets() {
 		if bytes.HasPrefix(lines.Row(rowIndex).Bytes()[bytePosOfRow:], b.Marker) {
 			return indentWidth, b.Width, true
@@ -708,14 +703,16 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 	isDraw bool,
 	foundPositionIndex int, foundIndexes []search.FoundPosition,
 ) int {
+	// 右端から 折り返し候補を探す探索マージン
+	const rightEdgeWrapMargin = 8 // Search margin from the right edge for wrap candidates.
+	const PageLineCount = 60      // language に移動する
 
-	const PageLineCount = 60 // language に移動する
-
-	contentWidth := e.editArea.Width - e.linenumberWidth
+	contentWidth := e.editArea.Width - e.lineNumberWidth
 
 	sy, sx := startScreenY, 0
 	var prevPrevCell, prevCell, currentCell locale.Cell // ★★
-	var prevRune1, prevRune2 rune                       // 表示する文字(currentCell.Ch,currentCellCh2)の1個前の文字, Controlcode の場合は "^", "X" // ★
+	var prevCellCh2 rune                                // 表示する文字 (currentCell.Ch, currentCellCh2) の1個前の文字, Controlcode を表示する為に 2個目の rune を用意 "^", "X" // ★
+
 	var breakpoint Boundary
 	lines := e.editBuffer.Rows()
 	isEndOfRow := rowIndex == (*lines).Length()-1
@@ -773,6 +770,14 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 			currentCell.Style = theme.ColorControlCode
 		}
 
+		/*
+			dflag := false
+			// if currentCell.Ch == '品' {
+			if currentCell.Ch == 'を' {
+				dflag = true
+			}
+		*/
+
 		// Is index in the found word
 		if foundPositionIndex >= 0 && foundPositionIndex < len(foundIndexes) {
 			u := isCursorInRange(rowIndex, bytePosOfRow,
@@ -793,17 +798,29 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 		}
 		currentCell.Style = currentCell.Style.Underline(isUnderline())
 
-		if sx+currentCell.Width >= contentWidth-8 && locale.IsBreakpoint(prevPrevCell, prevCell, currentCell) { // ★★
+		if sx+currentCell.Width >= contentWidth-rightEdgeWrapMargin && locale.IsBreakpoint(prevPrevCell, prevCell, currentCell) { // ★★
 			breakpoint = Boundary{
 				StartLogicalRowByteIndex: startLogicalRowByteIndex,
 				StopLogicalRowByteIndex:  bytePosOfRow,
 				LogicalRowWidth:          sx,
 				TotalCellWidth:           totalCellWidthForTab,
 			}
+
+			/*
+				if dflag {
+					gelog.Debug("set bp")
+				}
+			*/
 		}
 
 		// 論理行末には必ず記号が追加される: -, LF, EOF
 		if sx+currentCell.Width >= contentWidth {
+			/*
+				if dflag {
+					gelog.Debug("** a")
+				}
+			*/
+
 			if isLastCh {
 				// rune is LF or EOF
 				bo = append(bo, Boundary{
@@ -827,6 +844,12 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 					*/
 				}
 			} else if breakpoint.IsEmpty() {
+				/*
+					if dflag {
+						gelog.Debug("** b")
+					}
+				*/
+
 				// 論理行末が tab の場合 tab width を縮める
 				/* if currentCell.Ch == '\t' && contentWidth-sx > 1 {
 					bo = append(bo, Boundary{
@@ -845,6 +868,12 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 					sx = 0
 				} else */
 				if locale.Is(currentCell, locale.PROHIBITED) {
+					/*
+						if dflag {
+							gelog.Debug("** c")
+						}
+					*/
+
 					// 折り返した直後が禁則文字だった場合の処理
 					// currentCell は次の論理行頭だが、禁則文字だった場合
 					bo = append(bo, Boundary{
@@ -869,26 +898,40 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 					sy++
 					sx = 0 + hangingIndentWidth
 					wrapped = true
-					s := prevCell.Style //.Underline(isUnderline())
+					s := prevCell.Style.Underline(isUnderline())
 					if locale.Is(prevCell, locale.CONTROLCODE) {
-						cacheCellInfo(&runeWidth, bytePosOfRow,
-							prevRune1, s, 1, 1, prevCell.Class,
+						cacheCellInfo(&runeWidth, bytePosOfRow-prevCell.Size,
+							prevCell.Ch, s, 1, 1, prevCell.Class,
 							sy-startScreenY, sx, hangingIndentWidth)
 						if isDraw {
-							e.setCellInEditArea(sx, sy, s, prevRune1, 1)   // ★
-							e.setCellInEditArea(sx+1, sy, s, prevRune2, 1) // ★
+							e.setCellInEditArea(sx, sy, s, prevCell.Ch, 1)   // ★
+							e.setCellInEditArea(sx+1, sy, s, prevCellCh2, 1) // ★
 						}
 					} else {
-						cacheCellInfo(&runeWidth, bytePosOfRow,
-							prevRune1, s, prevCell.Size, prevCell.Width, prevCell.Class,
+						// 折り返した後の情報で再設定
+						/*
+							if prevCell.Ch == '品' {
+								ch, _, _ := lines.Row(rowIndex).DecodeRune(bytePosOfRow - prevCell.Size)
+								gelog.Debug("** A", "byte", bytePosOfRow-prevCell.Size, "sy", sy-startScreenY, "sx", sx, "bp", breakpoint.IsEmpty(), "ch", string(ch))
+							}
+						*/
+						cacheCellInfo(&runeWidth, bytePosOfRow-prevCell.Size,
+							prevCell.Ch, s, prevCell.Size, prevCell.Width, prevCell.Class,
 							sy-startScreenY, sx, hangingIndentWidth)
 						if isDraw {
-							e.setCellInEditArea(sx, sy, s, prevRune1, prevCell.Width) // ★
+							e.setCellInEditArea(sx, sy, s, prevCell.Ch, prevCell.Width) // ★
 						}
 					}
 					sx += prevCell.Width
-					s = currentCell.Style                           //.Underline(isUnderline()) // ★★
+					s = currentCell.Style.Underline(isUnderline())  // ★★
 					if locale.Is(currentCell, locale.CONTROLCODE) { // ★★
+						/*
+							if prevCell.Ch == '品' {
+								ch, _, _ := lines.Row(rowIndex).DecodeRune(bytePosOfRow - prevCell.Size)
+								gelog.Debug("** A", "byte", bytePosOfRow-prevCell.Size, "sy", sy-startScreenY, "sx", sx, "bp", breakpoint.IsEmpty(), "ch", string(ch))
+							}
+						*/
+						// これを確認する必要があるか？
 						cacheCellInfo(&runeWidth, bytePosOfRow,
 							currentCell.Ch, s, 1, 1, currentCell.Class,
 							sy-startScreenY, sx, hangingIndentWidth)
@@ -897,6 +940,7 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 							e.setCellInEditArea(sx+1, sy, s, currentCellCh2, 1)
 						}
 					} else {
+						// これを確認する必要があるか？
 						cacheCellInfo(&runeWidth, bytePosOfRow,
 							currentCell.Ch, s, currentCell.Size, currentCell.Width, currentCell.Class,
 							sy-startScreenY, sx, hangingIndentWidth)
@@ -905,6 +949,12 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 						}
 					}
 				} else {
+					/*
+						if dflag {
+							gelog.Debug("** d")
+						}
+					*/
+
 					bo = append(bo, Boundary{
 						StartLogicalRowByteIndex: startLogicalRowByteIndex,
 						StopLogicalRowByteIndex:  bytePosOfRow,
@@ -945,12 +995,21 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 					}
 				}
 			} else { // breakpoint is exists
+				/*
+					if dflag {
+						gelog.Debug("** e")
+					}
+				*/
+
 				bo = append(bo, breakpoint)
 				startLogicalRowByteIndex = breakpoint.StopLogicalRowByteIndex
 
 				bytePosOfRow = breakpoint.StopLogicalRowByteIndex
 				sx = breakpoint.LogicalRowWidth
 				// totalCellWidthForTab = breakpoint.TotalWidth
+				// cacheCellInfo(&runeWidth, bytePosOfRow,
+				// 	theme.MarkContinue, theme.ColorMarkContinue.Underline(isUnderline()), 1, 1, currentCell.Class,
+				// 	sy, sx, hangingIndentWidth)
 				if isDraw {
 					e.setCellInEditArea(sx, sy, theme.ColorMarkContinue.Underline(isUnderline()), theme.MarkContinue, 1)
 					e.fillInEditArea(utils.Rect{X: sx + 1, Y: sy, // 必要
@@ -975,12 +1034,38 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 					wrapped = false
 				}
 
+				// if currentCell.Ch == '取' {
+				// gelog.Debug("??", "sy", sy, "sx", sx, "hangingIndentWidth", hangingIndentWidth)
+				// }
+
 				continue // ! --------------------
 			}
 		} else { // if sx+currentCell.Width < contentWidth
+			/*
+				if dflag {
+					ch, _, _ := lines.Row(rowIndex).DecodeRune(bytePosOfRow)
+					gelog.Debug("** f", "byte", bytePosOfRow, "sy", sy-startScreenY, "sx", sx, "bp", breakpoint.IsEmpty(), "ch", string(ch))
+				}
+			*/
+			/*
+				if currentCell.Ch == '取' {
+					gelog.Debug("b", "byte", bytePosOfRow, "sy", sy-startScreenY, "sx", sx)
+
+					cacheCellInfo(&runeWidth, bytePosOfRow,
+						currentCell.Ch, currentCell.Style, currentCell.Size, currentCell.Width, currentCell.Class,
+						1, 0+hangingIndentWidth, hangingIndentWidth)
+				} else {
+					cacheCellInfo(&runeWidth, bytePosOfRow,
+						currentCell.Ch, currentCell.Style, currentCell.Size, currentCell.Width, currentCell.Class,
+						sy-startScreenY, sx, hangingIndentWidth)
+
+				}
+			*/
+
 			cacheCellInfo(&runeWidth, bytePosOfRow,
 				currentCell.Ch, currentCell.Style, currentCell.Size, currentCell.Width, currentCell.Class,
 				sy-startScreenY, sx, hangingIndentWidth)
+
 			if isDraw {
 				e.setCellInEditArea(sx, sy, currentCell.Style, currentCell.Ch, currentCell.Width) // ★★
 			}
@@ -992,7 +1077,7 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 					TotalCellWidth:           totalCellWidthForTab + currentCell.Width, // ★★
 				})
 				if isDraw {
-					e.fillInEditArea(utils.Rect{ // ★★ ここで,ほぼ全ての行のコンテンツ以降の画面を塗りつぶしている
+					e.fillInEditArea(utils.Rect{ // ★★ ここで,ほぼ全ての行のコンテンツ以降を塗りつぶしている
 						X:      sx + currentCell.Width,
 						Y:      sy,
 						Width:  contentWidth - (sx + currentCell.Width),
@@ -1017,17 +1102,17 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 		prevPrevCell = prevCell // ★★
 		prevCell = currentCell  // ★★
 
-		prevRune1 = currentCell.Ch // ★
-		prevRune2 = currentCellCh2 // ★
+		prevCellCh2 = currentCellCh2 // ★ ControlCode の 2文字目の rune
 
 		sx += currentCell.Width
 		totalCellWidthForTab += currentCell.Width
 		bytePosOfRow += currentCell.Size
-	}
 
-	// Linenumber
+	} // for
+
+	// Line number
 	if isDraw && e.mode != ModeMinibuffer {
-		if /* startScreenY >= 0 && */ e.linenumberWidth > 0 {
+		if e.lineNumberWidth > 0 {
 			y := e.editArea.Y + startScreenY
 			h := len(bo)
 			if startScreenY < 0 {
@@ -1035,43 +1120,36 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 				h += startScreenY
 			}
 			e.screen.FillRect(utils.Rect{X: e.editArea.X, Y: y,
-				Width:  e.linenumberWidth,
+				Width:  e.lineNumberWidth,
 				Height: h},
-				0, theme.ColorLinenumber)
+				0, theme.ColorLineNumber)
 
-			// Underline on linenumber area
+			// Underline on line number area
 			if cursorLineY != -1 {
 				e.screen.FillRect(utils.Rect{X: e.editArea.X, Y: e.editArea.Y + cursorLineY,
-					Width:  e.linenumberWidth,
+					Width:  e.lineNumberWidth,
 					Height: 1},
-					0, theme.ColorLinenumber.Underline(true))
+					0, theme.ColorLineNumber.Underline(true))
 			}
 		}
 
 		// Number
 		if startScreenY >= 0 && startScreenY < e.editArea.Height {
-			style := theme.ColorLinenumber
+			style := theme.ColorLineNumber
 
 			// 60行単位で色変更
 			pageIndex := rowIndex / PageLineCount
 			if pageIndex%2 != 0 {
-				style = theme.ColorLinenumberZebra
+				style = theme.ColorLineNumberOnEvenPage
 			}
-
-			// ページ先頭行 (1, 61, 121...)
-			/*
-				if rowIndex%PageLineCount == 0 {
-					style = theme.ColorLinenumberStarPage
-				}
-			*/
 
 			if startScreenY == cursorLineY {
 				style = style.Underline(true)
 			}
 
-			e.drawLinenumber(
+			e.drawLineNumber(
 				rowIndex+1,
-				e.linenumberWidth-2+e.editArea.X,
+				e.lineNumberWidth-2+e.editArea.X,
 				startScreenY,
 				style,
 			)
@@ -1083,7 +1161,7 @@ func (e *Editorleaf) drawLineWithCompute(startScreenY, rowIndex, cursorLogicalCY
 	return sy - startScreenY
 }
 
-func (e *Editorleaf) drawLinenumber(n int, x, y int, style tcell.Style) {
+func (e *Editorleaf) drawLineNumber(n int, x, y int, style tcell.Style) {
 	for n > 0 {
 		d := n % 10
 		e.screen.SetContent(x, y+e.editArea.Y, rune('0'+d), nil, style)
@@ -1106,6 +1184,10 @@ func cacheCellInfo(cache *[]locale.Cell, bytePosOfRow int,
 	if logicalRowIndex > 0 {
 		totalWidthLogicalRow -= hangingIndentWidth
 	}
+
+	/* if ch == '何' {
+		gelog.Debug("?", "ch", string(ch), "size", size, "width", width, "LogicalRowIndex", logicalRowIndex, "TotalWidthLogicalRow", totalWidthLogicalRow)
+	} */
 
 	(*cache)[bytePosOfRow] = locale.Cell{
 		Ch:                   ch,
@@ -1135,6 +1217,37 @@ func (e *Editorleaf) cursorPositionOnScreenLogicalRow(rowIndex, colIndex int) (l
 	return cell.TotalWidthLogicalRow, cell.LogicalRowIndex
 }
 
+/* func (e *Editorleaf) cursorPositionOnScreenLogicalRow(
+	rowIndex, colIndex int,
+) (lx, ly int) {
+
+	row := &e.bsArray.rows[rowIndex]
+
+	if len(row.RuneWidthCache) == 0 {
+		panic(fmt.Sprintf(
+			"RuneWidthCache empty row=%d col=%d line=%v",
+			rowIndex,
+			colIndex,
+			// string(row.Bytes),
+			row,
+		))
+	}
+
+	if colIndex >= len(row.RuneWidthCache) {
+		panic(fmt.Sprintf(
+			"cache short row=%d col=%d len=%d",
+			rowIndex,
+			colIndex,
+			len(row.RuneWidthCache),
+		))
+	}
+
+	cell := row.RuneWidthCache[colIndex]
+
+	return cell.TotalWidthLogicalRow,
+		cell.LogicalRowIndex
+}
+*/
 /*
 // colIndex が rowIndex 行の何番目の論理行上か調べる
 func (e *Editorleaf) logicalLineIndex(rowIndex, colIndex int) int {
@@ -1175,37 +1288,44 @@ func (e *Editorleaf) logicalLineIndex2(rowIndex, colIndex int) int {
 }
 */
 
-/* // Return the index of the logical line that contains the specified column.
-func (e *Editorleaf) getIndexOfLogicalRow(rowIndex, colIndex int) (int, bool) {
-	l := e.bsArray.BoundariesLen(rowIndex)
-	for i := 0; i < l; i++ {
-		bo := e.bsArray.Boundary(rowIndex, i)
-		if colIndex >= bo.StartLogicalRowByteIndex && colIndex < bo.StopLogicalRowByteIndex {
-			return i, true
-		}
-	}
-	return 0, false
-}
-*/
+/*
+	変更前
 
 // Return the index of the logical line that contains the specified column.
+
+	func (e *Editorleaf) getIndexOfLogicalRow(rowIndex, colIndex int) (int, bool) {
+		l := e.bsArray.BoundariesLen(rowIndex)
+		for i := 0; i < l; i++ {
+			bo := e.bsArray.Boundary(rowIndex, i)
+			if colIndex >= bo.StartLogicalRowByteIndex && colIndex < bo.StopLogicalRowByteIndex {
+				return i, true
+			}
+		}
+		return 0, false
+	}
+
+変更後 バグる
+*/
+// Return the index of the logical line that contains the specified column.
 func (e *Editorleaf) getIndexOfLogicalRow(rowIndex, colIndex int) (int, bool) {
-
-	/* 	l := e.bsArray.BoundariesLen(rowIndex)
-	   	for i := 0; i < l; i++ {
-	   		bo := e.bsArray.Boundary(rowIndex, i)
-	   		if colIndex >= bo.StartLogicalRowByteIndex && colIndex < bo.StopLogicalRowByteIndex {
-	   			return i, true
-	   		}
-	   	}
-	   	return 0, false
-	*/
-
 	cell := e.bsArray.rows[rowIndex].RuneWidthCache[colIndex]
-	// return cell.TotalWidthLogicalRow, cell.LogicalRowIndex
 	return cell.LogicalRowIndex, true
 }
 
+/* func (e *Editorleaf) getIndexOfLogicalRow(
+	rowIndex, colIndex int,
+) (int, bool) {
+
+	cache := e.bsArray.rows[rowIndex].RuneWidthCache
+
+	if colIndex < 0 || colIndex >= len(cache) {
+		return 0, false
+	}
+
+	cell := cache[colIndex]
+	return cell.LogicalRowIndex, true
+}
+*/
 // Check if the column index is within the last boundary of the specified row
 // Return false: out of index or not initialized.
 func (e *Editorleaf) inEndOfLogicalRow(rowIndex, colIndex int) bool {
