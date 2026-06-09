@@ -167,10 +167,3 @@ func (r *rows) Length() int {
 func (r *rows) IsRowIndexLastRow(rowIndex int) bool {
 	return len(*r)-1 == rowIndex
 }
-
-func (r *rows) String(rowIndex int) (string, bool) {
-	if rowIndex < 0 || rowIndex >= len(*r) {
-		return "", false
-	}
-	return string((*r)[rowIndex]), true
-}

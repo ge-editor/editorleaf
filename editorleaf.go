@@ -323,6 +323,38 @@ func (e *Editorleaf) GetBuffersFilterByCharacters(chars string) *buffer.BufferSe
 //
 // Line feed code is depending the editing buffer newline
 func (e *Editorleaf) RuneStatus(ch rune) string {
+	switch {
+	case ch == define.DEL:
+		return "^?"
+
+	case ch == '\t':
+		return `\t`
+
+	case ch == define.LF:
+		switch e.editBuffer.GetNewLine() {
+		case editbuffer.NewlineTypeLF:
+			return `\n`
+		case editbuffer.NewlineTypeCRLF:
+			return `\r\n`
+		case editbuffer.NewlineTypeCR:
+			return `\r`
+		default:
+			return "UNKNOWN"
+		}
+
+	case ch < 32:
+		// ^A ～ ^Z
+		var b [2]byte
+		b[0] = '^'
+		b[1] = byte(ch + 64)
+		return string(b[:])
+
+	default:
+		return string(ch)
+	}
+}
+
+/* func (e *Editorleaf) RuneStatus(ch rune) string {
 	str := ""
 	if ch == define.DEL { // DEL
 		str = `^?`
@@ -346,6 +378,7 @@ func (e *Editorleaf) RuneStatus(ch rune) string {
 	}
 	return str
 }
+*/
 
 // Use Editor.editArea as relative coordinates
 func (e *Editorleaf) showCursor(x, y int) {
@@ -376,8 +409,8 @@ func (e *Editorleaf) setCellInEditArea(x, y int, style tcell.Style, ch rune, chW
 	px := x + e.editArea.X + e.lineNumberWidth
 
 	e.screen.SetContent(px, y+e.editArea.Y, ch, nil, style)
-	for i := 1; i < chWidth; i++ {
-		e.screen.SetContent(px+i, y+e.editArea.Y, 0, nil, style)
+	if chWidth == 2 {
+		e.screen.SetContent(px+1, y+e.editArea.Y, 0, nil, style)
 	}
 }
 
@@ -436,7 +469,7 @@ func (e *Editorleaf) fillInEditArea(
 }
 
 // Editor.editArea as relative coordinates
-func (e *Editorleaf) fillInEditArea_1(rect utils.Rect, r rune, style tcell.Style) {
+/* func (e *Editorleaf) fillInEditArea_1(rect utils.Rect, r rune, style tcell.Style) {
 	if rect.Y < 0 || rect.Y >= e.editArea.Height ||
 		rect.X < 0 || rect.X >= e.editArea.Width {
 		return
@@ -446,6 +479,7 @@ func (e *Editorleaf) fillInEditArea_1(rect utils.Rect, r rune, style tcell.Style
 	rect.Y += e.editArea.Y
 	e.screen.FillRect(rect, r, style)
 }
+*/
 
 // Returns bool whether it is the rightmost view
 func (e *Editorleaf) rightmost() bool {
@@ -485,7 +519,11 @@ func (e *Editorleaf) drawEditorleaf() {
 	_, Cy := e.meta.Cx, e.meta.Cy // ...
 
 	// Cursor position in logical row
-	e.drawLineWithCompute(0, e.meta.RowIndex, -1, false, foundPositionIndex, foundPositionIndexes) // 最終的にこの呼び出しは不要になる
+	if e.bsArray.isDirty(e.meta.RowIndex) {
+		e.drawLineWithCompute(0, e.meta.RowIndex, -1, false, foundPositionIndex, foundPositionIndexes) // 最終的にこの呼び出しは不要になる
+	} else {
+		gelog.Debug("not call compute")
+	}
 	Lcx, Lcy := e.cursorPositionOnScreenLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 	// gecore.Echo.AddText(fmt.Sprintf("(Lcy,Lcx:%d,%d)", Lcy, Lcx))
 
@@ -499,7 +537,9 @@ func (e *Editorleaf) drawEditorleaf() {
 				totalRowAboveCursor = totalLogicalRowIfInHeight + Lcy
 			}
 
-			e.drawLineWithCompute(0, rowIndex, -1, false, foundPositionIndex, foundPositionIndexes) // 最終的にこの呼び出しは不要になる
+			if e.bsArray.isDirty(rowIndex) {
+				e.drawLineWithCompute(0, rowIndex, -1, false, foundPositionIndex, foundPositionIndexes) // 最終的にこの呼び出しは不要になる
+			}
 			totalLogicalRowIfInHeight += e.bsArray.BoundariesLen(rowIndex)
 
 			if totalLogicalRowIfInHeight > Height {
@@ -539,14 +579,20 @@ func (e *Editorleaf) drawEditorleaf() {
 	rowIndex := e.meta.RowIndex
 	y := Cy - Lcy
 	// gecore.Echo.AddText(fmt.Sprintf("(rowIndex:%d, y:%d)", rowIndex, y))
-	e.drawLineWithCompute(y, rowIndex, Lcy, true, -1, foundPositionIndexes)
+	if e.bsArray.isDirty(rowIndex) {
+		e.drawLineWithCompute(y, rowIndex, Lcy, true, -1, foundPositionIndexes)
+	} else {
+		e.drawLine(y, rowIndex, Lcy, -1, foundPositionIndexes)
+	}
 
 	// From the cursor position to up
 	rowIndex--
 	for ; rowIndex >= 0 && y >= 0; rowIndex-- {
-		e.drawLineWithCompute(y, rowIndex, -1, false, -1, foundPositionIndexes) // 最終的にこの呼び出しは不要になる
+		if e.bsArray.isDirty(rowIndex) {
+			e.drawLineWithCompute(y, rowIndex, -1, false, -1, foundPositionIndexes) // 最終的にこの呼び出しは不要になる
+		}
 		y -= e.bsArray.BoundariesLen(rowIndex)
-		e.drawLineWithCompute(y, rowIndex, -1, true, -1, foundPositionIndexes)
+		e.drawLine(y, rowIndex, -1, -1, foundPositionIndexes)
 	}
 
 	// From the cursor position to down
@@ -554,7 +600,11 @@ func (e *Editorleaf) drawEditorleaf() {
 	y = Cy + (e.bsArray.BoundariesLen(rowIndex) - Lcy)
 	rowIndex++
 	for ; rowIndex < e.RowsLength() && y < Height; rowIndex++ {
-		e.drawLineWithCompute(y, rowIndex, -1, true, -1, foundPositionIndexes)
+		if e.bsArray.isDirty(rowIndex) {
+			e.drawLineWithCompute(y, rowIndex, -1, true, -1, foundPositionIndexes)
+		} else {
+			e.drawLine(y, rowIndex, -1, -1, foundPositionIndexes)
+		}
 		y += e.bsArray.BoundariesLen(rowIndex)
 	}
 
@@ -1009,7 +1059,7 @@ func (e *Editorleaf) drawLineWithCompute(
 
 	// Line number
 	if isDraw && e.mode != ModeMinibuffer {
-		e.drawLineNumber(rowIndex, startScreenY, cursorLineY, bo, PageLineCount)
+		e.drawLineNumber(rowIndex, startScreenY, cursorLineY, len(bo), PageLineCount)
 	}
 
 	//
@@ -1017,10 +1067,117 @@ func (e *Editorleaf) drawLineWithCompute(
 	return sy - startScreenY
 }
 
-func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, bo []Boundary, PageLineCount int) {
+func (e *Editorleaf) drawLine(
+	startScreenY, rowIndex, cursorLogicalCY int,
+	foundPositionIndex int, foundIndexes []search.FoundPosition,
+) int {
+	const PageLineCount = 60 // will language に移動する
+
+	contentWidth := e.editArea.Width - e.lineNumberWidth
+
+	sy, sx := startScreenY, 0
+	//var prevCellCh2 rune        // 表示する文字 (currentCell.Ch, currentCellCh2) の1個前の文字, Controlcode を表示する為に 2個目の rune を用意 "^", "X" // ★
+
+	logicalRowLen := len(e.bsArray.rows[rowIndex].Boundaries)
+
+	startLogicalRowIndex := 0
+
+	if startScreenY < 0 {
+		startLogicalRowIndex = -startScreenY
+		sy = 0
+	}
+
+	if startLogicalRowIndex >= logicalRowLen {
+		return 0
+	}
+
+	hangingIndentWidth := e.bsArray.rows[rowIndex].HangingIndentWidth
+	if startLogicalRowIndex > 0 {
+		sx = hangingIndentWidth
+	}
+
+	//
+	cursorLineY := -1
+	if rowIndex == e.meta.RowIndex {
+		cursorLineY = cursorLogicalCY + startScreenY
+	}
+
+	runeWidthCache := e.bsArray.rows[rowIndex].RuneWidthCache
+
+	for logicalRowIndex := startLogicalRowIndex; logicalRowIndex < logicalRowLen; logicalRowIndex++ {
+		underline := sy == cursorLineY
+
+		// Fill Hanging Indent Width
+		if logicalRowIndex > 0 && hangingIndentWidth > 0 {
+			style := theme.ColorDefault.Underline(underline)
+			if underline {
+				style = style.Underline(underline)
+			}
+			e.fillInEditArea(utils.Rect{
+				X:      0,
+				Y:      sy,
+				Width:  hangingIndentWidth,
+				Height: 1,
+			}, 0, style)
+		}
+
+		bo := e.bsArray.Boundary(rowIndex, logicalRowIndex)
+
+		for bytePosOfRow := bo.StartLogicalRowByteIndex; bytePosOfRow < bo.StopLogicalRowByteIndex; {
+
+			cell := runeWidthCache[bytePosOfRow]
+			style := cell.Style
+			if underline {
+				style = style.Underline(underline)
+			}
+
+			e.setCellInEditArea(sx, sy, style, cell.Ch, cell.Width)
+			sx += cell.Width
+			bytePosOfRow += cell.Size
+		}
+
+		if logicalRowIndex < logicalRowLen-1 {
+			style := theme.ColorMarkContinue
+			if underline {
+				style = style.Underline(underline)
+			}
+
+			e.setCellInEditArea(sx, sy, style, theme.MarkContinue, 1)
+			sx += 1
+		}
+
+		style := theme.ColorDefault
+		if underline {
+			style = style.Underline(underline)
+		}
+		e.fillInEditArea(utils.Rect{
+			X:      sx,
+			Y:      sy,
+			Width:  contentWidth - sx,
+			Height: 1,
+		}, 0, style)
+
+		sy++
+		sx = 0 + hangingIndentWidth
+
+		if sy >= e.editArea.Y+e.editArea.Height {
+			break
+		}
+
+	} // for
+
+	// Line number
+	if e.mode != ModeMinibuffer {
+		e.drawLineNumber(rowIndex, startScreenY, cursorLineY, logicalRowLen, PageLineCount)
+	}
+
+	return sy - startScreenY
+}
+
+func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, h int /* bo []Boundary */, PageLineCount int) {
 	if e.lineNumberWidth > 0 {
 		y := e.editArea.Y + startScreenY
-		h := len(bo)
+		// h := len(bo)
 		if startScreenY < 0 {
 			y = e.editArea.Y
 			h += startScreenY

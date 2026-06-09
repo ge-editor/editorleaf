@@ -366,7 +366,7 @@ func (e *Editorleaf) MoveCursorBackward() {
 
 // Move cursor to the next line.
 func (e *Editorleaf) MoveCursorNextLine() {
-	var bo Boundary
+	var bo *Boundary
 
 	//e.makeAvailableBoundariesArray(e.meta.RowIndex)        // -------- !
 	if e.inEndOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex) { // last logical line
@@ -417,7 +417,7 @@ func (e *Editorleaf) MoveCursorPrevLine() {
 	//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
 	indexOfLogicalRow, _ := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 
-	var bo Boundary
+	var bo *Boundary
 	if indexOfLogicalRow == 0 { // first logical line
 		if e.meta.RowIndex == 0 {
 			gecore.Echo.AddText("Beginning of buffer")
@@ -687,7 +687,7 @@ func (e *Editorleaf) MoveCursorToLine(lineNumber int) {
 func (e *Editorleaf) InsertTab() {
 	if (*e.editBuffer.GetLangMode()).GetSoftTab() {
 		w := utils.TabWidth(e.meta.Cx, e.editBuffer.GetTabWidth())
-		for i := 0; i < w; i++ {
+		for range w { // for i := 0; i < w; i++ {
 			// e.InsertRune__(' ')
 			e.insertBytes([]byte{' '}, true)
 		}
@@ -722,10 +722,13 @@ func (e *Editorleaf) DeleteRuneBackward() {
 			return
 		}
 		// join to prev row
+		e.bsArray.rows = slices.Delete(e.bsArray.rows, start.RowIndex, start.RowIndex+1)
+		e.bsArray.Clear(start.RowIndex - 1)
 		lines := e.editBuffer.Rows()
 		start.RowIndex--
 		start.ColIndex = len((*lines)[start.RowIndex]) - 1
 	} else {
+		e.bsArray.Clear(start.RowIndex)
 		start.ColIndex = colIndex
 	}
 	removed := e.editBuffer.RemoveRegion(start, stop)
@@ -734,11 +737,11 @@ func (e *Editorleaf) DeleteRuneBackward() {
 	}
 	e.meta.Cursor = start
 
-	// gecore.Echo.AddText(fmt.Sprintf("DeleteRuneBackward %d:%d", start.RowIndex+1, stop.RowIndex+1))
-	//e.makeAvailableBoundariesArray(start.RowIndex) // -------- !
-	if count := stop.RowIndex - start.RowIndex; count > 0 {
-		e.bsArray.Delete(start.RowIndex+1, count)
-	}
+	/*
+		if count := stop.RowIndex - start.RowIndex; count > 0 {
+			e.bsArray.Delete(start.RowIndex+1, count)
+		}
+	*/
 
 	e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{Class: editbuffer.DELETE_BACKWARD, Before: stop, After: start, Data: *removed})
 	e.syncCursorAndBufferForEdit(DELETE, start, stop)
@@ -755,9 +758,12 @@ func (e *Editorleaf) DeleteRune() {
 
 	beRemovedCh, size, _ := e.editBuffer.Rows().Row(e.meta.RowIndex).DecodeRune(e.meta.ColIndex)
 	if beRemovedCh == '\n' {
+		e.bsArray.Clear(stop.RowIndex)
 		stop.RowIndex++
 		stop.ColIndex = 0
+		e.bsArray.rows = slices.Delete(e.bsArray.rows, stop.RowIndex, stop.RowIndex+1)
 	} else {
+		e.bsArray.Clear(stop.RowIndex)
 		stop.ColIndex += size
 	}
 	removed := e.editBuffer.RemoveRegion(start, stop)
@@ -765,11 +771,11 @@ func (e *Editorleaf) DeleteRune() {
 		return
 	}
 
-	// gecore.Echo.AddText(fmt.Sprintf("DeleteRune %d:%d", start.RowIndex+1, stop.RowIndex+1))
-	//e.makeAvailableBoundariesArray(start.RowIndex) // -------- !
-	if count := stop.RowIndex - start.RowIndex; count > 0 {
-		e.bsArray.Delete(start.RowIndex+1, count)
-	}
+	/*
+		if count := stop.RowIndex - start.RowIndex; count > 0 {
+			e.bsArray.Delete(start.RowIndex+1, count)
+		}
+	*/
 
 	e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{Class: editbuffer.DELETE, Before: start, After: start, Data: *removed})
 	e.syncCursorAndBufferForEdit(DELETE, stop, start)
@@ -885,10 +891,15 @@ func (e *Editorleaf) killRegion(start, stop editbuffer.Cursor) {
 		return
 	}
 
+	e.bsArray.rows = slices.Delete(e.bsArray.rows, start.RowIndex+1, stop.RowIndex+1)
+	e.bsArray.Clear(start.RowIndex)
+
 	//e.makeAvailableBoundariesArray(start.RowIndex) // -------- !
-	if count := stop.RowIndex - start.RowIndex; count > 0 {
-		e.bsArray.Delete(start.RowIndex+1, count)
-	}
+	/*
+		if count := stop.RowIndex - start.RowIndex; count > 0 {
+			e.bsArray.Delete(start.RowIndex+1, count)
+		}
+	*/
 
 	e.syncCursorAndBufferForEdit(DELETE, start, stop)
 	e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{Class: editbuffer.DELETE_BACKWARD, Before: start, After: start, Data: *removed})
@@ -945,6 +956,7 @@ func (e Editorleaf) BackwardKillLine() {
 	}
 
 	// gelog.Info("removed", "'"+string(*removed)+"'")
+	e.bsArray.Clear(e.meta.Cursor.RowIndex)
 
 	e.syncCursorAndBufferForEdit(DELETE, start, e.meta.Cursor)
 
@@ -983,7 +995,6 @@ func (e *Editorleaf) KillLine() {
 		return
 	}
 
-	// l, _ := lines.GetColLength(e.meta.RowIndex)
 	l := lines.Row(e.meta.RowIndex).Length()
 	stop.ColIndex = l - 1
 	removed = e.editBuffer.RemoveRegion(e.meta.Cursor, stop)
@@ -991,11 +1002,14 @@ func (e *Editorleaf) KillLine() {
 		return
 	}
 
+	e.bsArray.Clear(e.meta.RowIndex)
 	// gecore.Echo.AddText(fmt.Sprintf("KillLine %d:%d", start.RowIndex+1, stop.RowIndex+1))
 	//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
-	if count := stop.RowIndex - e.meta.RowIndex; count > 0 {
-		e.bsArray.Delete(e.meta.RowIndex+1, count)
-	}
+	/*
+		if count := stop.RowIndex - e.meta.RowIndex; count > 0 {
+			e.bsArray.Delete(e.meta.RowIndex+1, count)
+		}
+	*/
 	// e.bsay.bsayDelete(e.meta.RowIndex+1, stop.RowIndex+1)
 
 	e.syncCursorAndBufferForEdit(DELETE, e.meta.Cursor, stop)
@@ -1328,6 +1342,8 @@ func (e *Editorleaf) CharInfo() {
 
 // insertBytes は、バイトスライスを現在のカーソル位置に挿入し、カーソルを前進させます。
 func (e *Editorleaf) insertBytes(bytes []byte, enableUndo bool) {
+	e.bsArray.Clear(e.meta.RowIndex)
+
 	beforeCursor := e.meta.Cursor
 	bytesArray := editbuffer.SplitByLF(bytes)
 	lines := e.editBuffer.Rows()
@@ -1521,3 +1537,48 @@ func (e Editorleaf) IsEndOfLine() bool {
 	return false
 }
 */
+
+// ------------------------------------------------------------------
+//
+// ------------------------------------------------------------------
+
+func removeRegion(rows *[][]byte, start, end editbuffer.Cursor) {
+	// Checked row index. The start position of the region is after the end position, or the end position is beyond the last line
+	if start.RowIndex > end.RowIndex || end.RowIndex >= len(*rows) {
+		return
+	}
+	if start.RowIndex == end.RowIndex && start.ColIndex >= end.ColIndex {
+		return
+	}
+
+	topRow := &(*rows)[start.RowIndex]
+	// Checked col index. The start position of the region is the right of newline or EOF
+	if start.ColIndex >= len(*topRow) {
+		return
+	}
+
+	bottomRow := &(*rows)[end.RowIndex]
+	// Checked col index. The end position of the region is the right of newline or EOF
+	if end.ColIndex >= len(*bottomRow) { // EOF
+		return
+	}
+
+	if start.RowIndex == end.RowIndex {
+		// *topRow = delete(topRow, start.ColIndex, end.ColIndex)
+		*topRow = slices.Delete(
+			*topRow,
+			start.ColIndex,
+			end.ColIndex, // これでいいか？
+		)
+		return
+	}
+
+	// top row
+	*topRow = (*topRow)[:start.ColIndex]
+	// bottom row
+	// Remove middle and bottom rows
+	*topRow = append(*topRow, (*bottomRow)[end.ColIndex:]...)
+	if end.RowIndex-start.RowIndex > 0 { // 常に true?
+		*rows = slices.Delete(*rows, start.RowIndex+1, end.RowIndex+1)
+	}
+}

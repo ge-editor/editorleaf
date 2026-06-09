@@ -112,17 +112,17 @@ func (b *BoundariesArray) BoundariesLen(rowIndex int) int {
 
 // Boundary returns the Boundary for the specified row
 // and logical row index.
-func (b *BoundariesArray) Boundary(rowIndex, logicalRowIndex int) Boundary {
+func (b *BoundariesArray) Boundary(rowIndex, logicalRowIndex int) *Boundary {
 	b.beAvailable(rowIndex)
-	return b.rows[rowIndex].Boundaries[logicalRowIndex]
+	return &b.rows[rowIndex].Boundaries[logicalRowIndex]
 }
 
 // LastBoundary returns the last logical row boundary
 // for the specified physical row.
-func (b *BoundariesArray) LastBoundary(rowIndex int) Boundary {
+func (b *BoundariesArray) LastBoundary(rowIndex int) *Boundary {
 	b.beAvailable(rowIndex)
 	row := b.rows[rowIndex]
-	return row.Boundaries[len(row.Boundaries)-1]
+	return &row.Boundaries[len(row.Boundaries)-1]
 }
 
 // GetHangingIndentWidth returns the hanging indentation width
@@ -173,6 +173,10 @@ func (b *BoundariesArray) ClearAll() {
 	b.rows = nil
 }
 
+func (b *BoundariesArray) Clear(rowIndex int) {
+	b.rows[rowIndex] = RowLayout{}
+}
+
 // ------------------------------------------------------------------
 // Lazy evaluation support
 
@@ -191,32 +195,3 @@ func (b *BoundariesArray) beAvailable(rowIndex int) {
 		)
 	}
 }
-
-// ------------------------------------------------------------------
-// Internal helpers
-
-/*
-	// ensureSize expands the internal slice so that rowIndex
-
-// becomes addressable.
-
-	func (b *BoundariesArray) ensureSize(rowIndex int) {
-		if rowIndex < len(b.rows) {
-			return
-		}
-
-		newSize := rowIndex + 1
-
-		if newSize > cap(b.rows) {
-			newCap := cap(b.rows) * 2
-			if newCap < newSize {
-				newCap = newSize
-			}
-			newSlice := make([]RowLayout, newSize, newCap)
-			copy(newSlice, b.rows)
-			b.rows = newSlice
-		} else {
-			b.rows = b.rows[:newSize]
-		}
-	}
-*/
