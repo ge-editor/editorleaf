@@ -1057,13 +1057,13 @@ func (e *Editorleaf) Undo() {
 	for _, a := range actions {
 		// gelog.Info("e.UndoAction.Pop() %v %v '%s'", a.Before, a.After, string(a.Data))
 		if a.Class == editbuffer.INSERT {
-			e.editBuffer.RemoveRegion(a.Before, a.After)
+			data := e.editBuffer.RemoveRegion(a.Before, a.After)
 
-			// gecore.Echo.AddText(fmt.Sprintf("Undo %d:%d", start.RowIndex+1, stop.RowIndex+1))
-			//e.makeAvailableBoundariesArray(a.Before.meta.RowIndex) // -------- !
-			// e.bsay.bsayDelete(a.Before.meta.RowIndex+1, a.After.RowIndex+1)
-			if count := a.After.RowIndex - a.Before.RowIndex; count > 0 {
+			//if count := a.After.RowIndex - a.Before.RowIndex; count > 0 {
+			if data != nil {
+				count := a.After.RowIndex - a.Before.RowIndex
 				e.bsArray.Delete(a.Before.RowIndex+1, count)
+				e.bsArray.Clear(a.Before.RowIndex)
 			}
 
 			e.syncCursorAndBufferForEdit(DELETE, a.Before, a.After)
@@ -1098,13 +1098,13 @@ func (e *Editorleaf) Redo() {
 			e.meta.Cursor = a.Before
 			e.insertBytes(a.Data, false)
 		} else if a.Class == editbuffer.DELETE_BACKWARD {
-			e.editBuffer.RemoveRegion(a.After, a.Before)
+			data := e.editBuffer.RemoveRegion(a.After, a.Before)
 
-			// gecore.Echo.AddText(fmt.Sprintf("Redo DELETE_BACKWARD %d:%d", a.After.RowIndex+1, a.Before.meta.RowIndex+1))
-			//e.makeAvailableBoundariesArray(a.After.RowIndex) // -------- !
-			// e.bsay.bsayDelete(a.After.RowIndex+1, a.Before.meta.RowIndex+1)
-			if count := a.Before.RowIndex - a.After.RowIndex; count > 0 {
+			// if count := a.Before.RowIndex - a.After.RowIndex; count > 0 {
+			if data != nil {
+				count := a.Before.RowIndex - a.After.RowIndex
 				e.bsArray.Delete(a.After.RowIndex+1, count)
+				e.bsArray.Clear(a.After.RowIndex)
 			}
 
 			e.syncCursorAndBufferForEdit(DELETE, a.After, a.Before)
@@ -1118,13 +1118,13 @@ func (e *Editorleaf) Redo() {
 				cursor.RowIndex++
 				cursor.ColIndex = 0
 			}
-			e.editBuffer.RemoveRegion(a.Before, cursor)
+			data := e.editBuffer.RemoveRegion(a.Before, cursor)
 
-			// gecore.Echo.AddText(fmt.Sprintf("Redo DELETE %d:%d", a.Before.meta.RowIndex+1, cursor.RowIndex+1))
-			//e.makeAvailableBoundariesArray(a.Before.meta.RowIndex) // -------- !
-			// e.bsay.bsayDelete(a.Before.meta.RowIndex+1, cursor.RowIndex+1)
-			if count := cursor.RowIndex - a.Before.RowIndex; count > 0 {
+			// if count := cursor.RowIndex - a.Before.RowIndex; count > 0 {
+			if data != nil {
+				count := cursor.RowIndex - a.Before.RowIndex
 				e.bsArray.Delete(a.Before.RowIndex+1, count)
+				e.bsArray.Clear(a.Before.RowIndex)
 			}
 
 			e.syncCursorAndBufferForEdit(DELETE, a.Before, cursor)

@@ -409,8 +409,9 @@ func (e *Editorleaf) setCellInEditArea(x, y int, style tcell.Style, ch rune, chW
 	px := x + e.editArea.X + e.lineNumberWidth
 
 	e.screen.SetContent(px, y+e.editArea.Y, ch, nil, style)
-	if chWidth == 2 {
-		e.screen.SetContent(px+1, y+e.editArea.Y, 0, nil, style)
+	// Wide char and Tab
+	for i := 1; i < chWidth; i++ {
+		e.screen.SetContent(px+i, y+e.editArea.Y, 0, nil, style)
 	}
 }
 
@@ -503,9 +504,12 @@ func (e *Editorleaf) drawRightBar() {
 func (e *Editorleaf) drawEditorleaf() {
 
 	if e.mode == ModeEditor {
-		// 行数が変わったら呼び出す
-		// ひとまずここで呼び出すこととする
-		e.lineNumberWidth = digitsScreenWidth(e.RowsLength()) + 1
+		lineNumberWidth := digitsScreenWidth(e.RowsLength()) + 1
+		// The display width for the number of rows has been changed.
+		if lineNumberWidth != e.lineNumberWidth {
+			e.lineNumberWidth = lineNumberWidth
+			e.bsArray.ClearAll()
+		}
 	} else {
 		e.lineNumberWidth = 0
 	}
@@ -520,7 +524,7 @@ func (e *Editorleaf) drawEditorleaf() {
 
 	// Cursor position in logical row
 	if e.bsArray.isDirty(e.meta.RowIndex) {
-		e.drawLineWithCompute(0, e.meta.RowIndex, -1, false, foundPositionIndex, foundPositionIndexes) // 最終的にこの呼び出しは不要になる
+		e.drawLineWithCompute(0, e.meta.RowIndex, -1, false, foundPositionIndex, foundPositionIndexes)
 	} else {
 		gelog.Debug("not call compute")
 	}
@@ -538,7 +542,7 @@ func (e *Editorleaf) drawEditorleaf() {
 			}
 
 			if e.bsArray.isDirty(rowIndex) {
-				e.drawLineWithCompute(0, rowIndex, -1, false, foundPositionIndex, foundPositionIndexes) // 最終的にこの呼び出しは不要になる
+				e.drawLineWithCompute(0, rowIndex, -1, false, foundPositionIndex, foundPositionIndexes)
 			}
 			totalLogicalRowIfInHeight += e.bsArray.BoundariesLen(rowIndex)
 
@@ -589,7 +593,7 @@ func (e *Editorleaf) drawEditorleaf() {
 	rowIndex--
 	for ; rowIndex >= 0 && y >= 0; rowIndex-- {
 		if e.bsArray.isDirty(rowIndex) {
-			e.drawLineWithCompute(y, rowIndex, -1, false, -1, foundPositionIndexes) // 最終的にこの呼び出しは不要になる
+			e.drawLineWithCompute(y, rowIndex, -1, false, -1, foundPositionIndexes)
 		}
 		y -= e.bsArray.BoundariesLen(rowIndex)
 		e.drawLine(y, rowIndex, -1, -1, foundPositionIndexes)
@@ -613,7 +617,20 @@ func (e *Editorleaf) drawEditorleaf() {
 	// clear remaining area
 	h := Height - y
 	if h > 0 {
-		e.fillInEditArea(utils.Rect{X: 0, Y: y, Width: Width, Height: h}, 0, theme.ColorDefault)
+		e.fillInEditArea(utils.Rect{
+			X:      0,
+			Y:      y,
+			Width:  Width,
+			Height: h,
+		}, 0, theme.ColorDefault)
+
+		// line number area
+		e.screen.FillRect(utils.Rect{
+			X:      e.editArea.X,
+			Y:      y,
+			Width:  e.lineNumberWidth,
+			Height: h,
+		}, 0, theme.ColorLineNumber)
 	}
 
 	///////////////////////////////////////
