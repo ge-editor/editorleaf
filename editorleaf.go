@@ -200,7 +200,18 @@ func (e *Editorleaf) MinibufferMode(mode Mode) {
 
 // ------------------------------------------------------------------
 // SyncEditor
+// undo/redo の同期も必要
 // ------------------------------------------------------------------
+
+/*
+formatter 前後の差分を下記の形式に落とし込みをする必要がある
+
+[]EditOp{
+ Insert{},
+ Delete{},
+ Replace{},
+}
+*/
 
 type syncType int
 
@@ -219,16 +230,30 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 	// Synchronize cursor positions in the buffer sets associated with the edited file.
 	for _, buffSet := range *BufferSets {
 		// Skip if this buffer set is not linked to the file being edited.
-		if buffSet.EditBuffer != e.editBuffer {
-			continue
-		}
+		/*
+			if buffSet.EditBuffer != e.editBuffer {
+				continue
+			}
+		*/
 
 		for _, meta := range buffSet.GetMetas() {
 			// Adjust cursor based on the type of edit.
 			switch sync {
 			case INSERT:
+				meta.Mark.AdjustForInsertion(start, end)
+
+				// Skip if this buffer set is not linked to the file being edited.
+				if buffSet.EditBuffer != e.editBuffer {
+					continue
+				}
 				meta.Cursor.AdjustForInsertion(start, end)
 			case DELETE:
+				meta.Mark.AdjustForDeletion(start, end)
+
+				// Skip if this buffer set is not linked to the file being edited.
+				if buffSet.EditBuffer != e.editBuffer {
+					continue
+				}
 				meta.Cursor.AdjustForDeletion(start, end)
 			}
 		}
@@ -240,40 +265,57 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 	// for _, leaf := range leaves {
 	tree.GetRootTree().ForEachLeaf(func(leaf tree.Leaf) {
 		editor, ok := leaf.(*Editorleaf)
-		if ok {
-			// editor := leaf.(*Editorleaf)
-			// Skip if the editor is linked to a different file or is the current editor.
-			if editor.editBuffer != e.editBuffer {
-				return
-				// continue
-			}
-			// Adjust foundIndex that is results of search and replace
-			foundIndexes := editor.meta.Search.GetFindIndexes()
-			for i := 0; i < len(foundIndexes); i++ {
-				// gelog.Info("fc1 %v", foundIndexes[i])
-				switch sync {
-				case INSERT:
-					foundIndexes[i].Start.AdjustForInsertion(start, end)
-					foundIndexes[i].Stop.AdjustForInsertion(start, end)
-				case DELETE:
-					foundIndexes[i].Start.AdjustForDeletion(start, end)
-					foundIndexes[i].Stop.AdjustForDeletion(start, end)
-				}
-				// gelog.Info("fc2 %v", foundIndexes[i])
-			}
-			if editor == e {
-				return
-				// continue
-			}
+		if !ok {
+			return
+		}
 
+		// Skip if the editor is linked to a different file or is the current editor.
+		if editor.editBuffer != e.editBuffer {
+			return
+		}
+		// Adjust foundIndex that is results of search and replace
+		foundIndexes := editor.meta.Search.GetFindIndexes()
+		for i := 0; i < len(foundIndexes); i++ {
+			// gelog.Info("fc1 %v", foundIndexes[i])
 			switch sync {
 			case INSERT:
+				foundIndexes[i].Start.AdjustForInsertion(start, end)
+				foundIndexes[i].Stop.AdjustForInsertion(start, end)
+			case DELETE:
+				foundIndexes[i].Start.AdjustForDeletion(start, end)
+				foundIndexes[i].Stop.AdjustForDeletion(start, end)
+			}
+			// gelog.Info("fc2 %v", foundIndexes[i])
+		}
+
+		/* if editor == e {
+			return
+		} */
+
+		for _, mark := range *Marks {
+			switch sync {
+			case INSERT:
+				mark.AdjustForInsertion(start, end)
+			case DELETE:
+				mark.AdjustForDeletion(start, end)
+			}
+		}
+
+		switch sync {
+		case INSERT:
+			editor.meta.Mark.AdjustForInsertion(start, end)
+
+			if editor != e {
 				editor.meta.Cursor.AdjustForInsertion(start, end)
 				// Update buffer boundary array if rows were inserted.
 				if end.RowIndex-start.RowIndex > 0 {
 					editor.bsArray.Insert(start.RowIndex+1, end.RowIndex-(start.RowIndex+1))
 				}
-			case DELETE:
+			}
+		case DELETE:
+			editor.meta.Mark.AdjustForDeletion(start, end)
+
+			if editor != e {
 				editor.meta.Cursor.AdjustForDeletion(start, end)
 				// Update buffer boundary array if rows were deleted.
 				if count := end.RowIndex - start.RowIndex; count > 0 {
@@ -354,36 +396,9 @@ func (e *Editorleaf) RuneStatus(ch rune) string {
 	}
 }
 
-/* func (e *Editorleaf) RuneStatus(ch rune) string {
-	str := ""
-	if ch == define.DEL { // DEL
-		str = `^?`
-	} else if ch == '\t' {
-		str = `\t`
-	} else if ch == define.LF {
-		switch e.editBuffer.GetNewLine() {
-		case editbuffer.NewlineTypeLF:
-			str = `\n`
-		case editbuffer.NewlineTypeCRLF:
-			str = `\r\n`
-		case editbuffer.NewlineTypeCR:
-			str = `\r`
-		default:
-			return "UNKNOWN"
-		}
-	} else if ch < 32 {
-		str = fmt.Sprintf("^%c", ch+64)
-	} else {
-		str = string(ch)
-	}
-	return str
-}
-*/
-
 // Use Editor.editArea as relative coordinates
 func (e *Editorleaf) showCursor(x, y int) {
-	// iy := e.logicalLineIndex(e.meta.RowIndex, e.meta.ColIndex)
-	_, iy := e.cursorPositionOnScreenLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+	_, iy := e.bsArray.CursorPositionOnScreenLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 
 	hangingIndentWidth := 0
 	if iy > 0 {
@@ -523,12 +538,12 @@ func (e *Editorleaf) drawEditorleaf() {
 	_, Cy := e.meta.Cx, e.meta.Cy // ...
 
 	// Cursor position in logical row
-	if e.bsArray.isDirty(e.meta.RowIndex) {
+	if e.bsArray.NeedsReparse(e.meta.RowIndex) {
 		e.drawLineWithCompute(0, e.meta.RowIndex, -1, false, foundPositionIndex, foundPositionIndexes)
 	} else {
 		gelog.Debug("not call compute")
 	}
-	Lcx, Lcy := e.cursorPositionOnScreenLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+	Lcx, Lcy := e.bsArray.CursorPositionOnScreenLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 	// gecore.Echo.AddText(fmt.Sprintf("(Lcy,Lcx:%d,%d)", Lcy, Lcx))
 
 	totalLogicalRowIfInHeight := 0
@@ -541,7 +556,7 @@ func (e *Editorleaf) drawEditorleaf() {
 				totalRowAboveCursor = totalLogicalRowIfInHeight + Lcy
 			}
 
-			if e.bsArray.isDirty(rowIndex) {
+			if e.bsArray.NeedsReparse(rowIndex) {
 				e.drawLineWithCompute(0, rowIndex, -1, false, foundPositionIndex, foundPositionIndexes)
 			}
 			totalLogicalRowIfInHeight += e.bsArray.BoundariesLen(rowIndex)
@@ -583,7 +598,7 @@ func (e *Editorleaf) drawEditorleaf() {
 	rowIndex := e.meta.RowIndex
 	y := Cy - Lcy
 	// gecore.Echo.AddText(fmt.Sprintf("(rowIndex:%d, y:%d)", rowIndex, y))
-	if e.bsArray.isDirty(rowIndex) {
+	if e.bsArray.NeedsReparse(rowIndex) {
 		e.drawLineWithCompute(y, rowIndex, Lcy, true, -1, foundPositionIndexes)
 	} else {
 		e.drawLine(y, rowIndex, Lcy, -1, foundPositionIndexes)
@@ -592,7 +607,7 @@ func (e *Editorleaf) drawEditorleaf() {
 	// From the cursor position to up
 	rowIndex--
 	for ; rowIndex >= 0 && y >= 0; rowIndex-- {
-		if e.bsArray.isDirty(rowIndex) {
+		if e.bsArray.NeedsReparse(rowIndex) {
 			e.drawLineWithCompute(y, rowIndex, -1, false, -1, foundPositionIndexes)
 		}
 		y -= e.bsArray.BoundariesLen(rowIndex)
@@ -604,7 +619,7 @@ func (e *Editorleaf) drawEditorleaf() {
 	y = Cy + (e.bsArray.BoundariesLen(rowIndex) - Lcy)
 	rowIndex++
 	for ; rowIndex < e.RowsLength() && y < Height; rowIndex++ {
-		if e.bsArray.isDirty(rowIndex) {
+		if e.bsArray.NeedsReparse(rowIndex) {
 			e.drawLineWithCompute(y, rowIndex, -1, true, -1, foundPositionIndexes)
 		} else {
 			e.drawLine(y, rowIndex, -1, -1, foundPositionIndexes)
@@ -1283,20 +1298,30 @@ func cacheCellInfo(cache *[]locale.Cell, bytePosOfRow int,
 }
 
 // Returns the screen position of the cursor corresponding from cached array to the specified column index in logical rows.
-func (e *Editorleaf) cursorPositionOnScreenLogicalRow(rowIndex, colIndex int) (lx, ly int) {
+/* func (e *Editorleaf) cursorPositionOnScreenLogicalRow(rowIndex, colIndex int) (lx, ly int) {
+	if e.bsArray.NeedsReparse(rowIndex) {
+		e.drawLineWithCompute(0, rowIndex, -1, false, 0, nil)
+	}
+	gelog.Debug("rows", e.bsArray.rows[rowIndex])
 	cell := e.bsArray.rows[rowIndex].RuneWidthCache[colIndex]
 	return cell.TotalWidthLogicalRow, cell.LogicalRowIndex
 }
+*/
 
 // Return the index of the logical line that contains the specified column.
-func (e *Editorleaf) getIndexOfLogicalRow(rowIndex, colIndex int) (int, bool) {
+/* func (e *Editorleaf) getIndexOfLogicalRow(rowIndex, colIndex int) (int, bool) {
+	if e.bsArray.NeedsReparse(rowIndex) {
+		e.drawLineWithCompute(0, rowIndex, -1, false, 0, nil)
+	}
 	cell := e.bsArray.rows[rowIndex].RuneWidthCache[colIndex]
 	return cell.LogicalRowIndex, true
 }
+*/
 
 // Check if the column index is within the last boundary of the specified row
 // Return false: out of index or not initialized.
-func (e *Editorleaf) inEndOfLogicalRow(rowIndex, colIndex int) bool {
+/* func (e *Editorleaf) inEndOfLogicalRow(rowIndex, colIndex int) bool {
 	lastBoundary := e.bsArray.LastBoundary(rowIndex)
 	return colIndex >= lastBoundary.StartLogicalRowByteIndex && colIndex < lastBoundary.StopLogicalRowByteIndex
 }
+*/

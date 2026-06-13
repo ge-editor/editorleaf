@@ -93,7 +93,6 @@ func (b *BoundariesArray) Set(
 	hangingIndentWidth int,
 	runeWidths []locale.Cell, // index is rowIndex byte position
 ) {
-	// b.ensureSize(rowIndex)
 	utils.EnsureSize(&b.rows, rowIndex)
 
 	b.rows[rowIndex] = RowLayout{
@@ -174,24 +173,68 @@ func (b *BoundariesArray) ClearAll() {
 }
 
 func (b *BoundariesArray) Clear(rowIndex int) {
+	if len(b.rows) <= rowIndex {
+		return
+	}
 	b.rows[rowIndex] = RowLayout{}
 }
 
 // ------------------------------------------------------------------
 // Lazy evaluation support
 
-// isDirty reports whether layout information for rowIndex
+// NeedsReparse reports whether layout information for rowIndex
 // needs to be recomputed.
-func (b *BoundariesArray) isDirty(rowIndex int) bool {
-	return rowIndex >= len(b.rows) ||
-		len(b.rows[rowIndex].Boundaries) == 0
+func (b *BoundariesArray) NeedsReparse(rowIndex int) bool {
+	if b == nil {
+		return true
+	}
+
+	if rowIndex < 0 || rowIndex >= len(b.rows) {
+		return true
+	}
+
+	row := b.rows[rowIndex]
+
+	if len(row.RuneWidthCache) != len(*b.editor.editBuffer.Rows().Row(rowIndex)) {
+		return true
+	}
+
+	// nil = never parsed
+	return row.Boundaries == nil
 }
 
 // beAvailable ensures layout data for rowIndex is computed.
 func (b *BoundariesArray) beAvailable(rowIndex int) {
-	if b.isDirty(rowIndex) {
+	if b.NeedsReparse(rowIndex) {
 		b.editor.drawLineWithCompute(
 			0, rowIndex, -1, false, -1, []search.FoundPosition{},
 		)
 	}
+}
+
+// Returns the screen position of the cursor corresponding from cached array to the specified column index in logical rows.
+func (b *BoundariesArray) CursorPositionOnScreenLogicalRow(rowIndex, colIndex int) (lx, ly int) {
+	b.beAvailable(rowIndex)
+	cell := b.rows[rowIndex].RuneWidthCache[colIndex]
+	return cell.TotalWidthLogicalRow, cell.LogicalRowIndex
+}
+
+func (b *BoundariesArray) GetIndexOfLogicalRow(rowIndex, colIndex int) int {
+	b.beAvailable(rowIndex)
+	cell := b.rows[rowIndex].RuneWidthCache[colIndex]
+	return cell.LogicalRowIndex
+}
+
+// Check if the column index is within the last boundary of the specified row
+// Return false: out of index or not initialized.
+func (b *BoundariesArray) OnEndOfLogicalRow(rowIndex, colIndex int) bool {
+	b.beAvailable(rowIndex)
+	lastBoundary := b.LastBoundary(rowIndex)
+	return colIndex >= lastBoundary.StartLogicalRowByteIndex && colIndex < lastBoundary.StopLogicalRowByteIndex
+}
+
+func (b *BoundariesArray) IsEndOfLogicalRow(rowIndex, colIndex int) bool {
+	b.beAvailable(rowIndex)
+	cell := b.rows[rowIndex].RuneWidthCache[colIndex]
+	return b.rows[rowIndex].Boundaries[cell.LogicalRowIndex].StopLogicalRowByteIndex == colIndex
 }

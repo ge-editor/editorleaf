@@ -1,17 +1,8 @@
-// gecore/mark/mark.go
-
 package mark
 
 import (
-	"fmt"
-
 	"github.com/ge-editor/editorleaf/editbuffer"
-	"github.com/ge-editor/utils"
 )
-
-func NewMarks() *marks {
-	return &marks{}
-}
 
 func NewMark(ff *editbuffer.EditBuffer, current editbuffer.Cursor, content string) *Mark {
 	return &Mark{
@@ -27,100 +18,77 @@ type Mark struct {
 	Content string
 }
 
-type marks []*Mark
-
-// AddMark:
-func (m *marks) AddMark(a *Mark) {
-	*m = append(*m, a)
-}
-
-// UnsetMarkByValue removes the last matching mark by value
-func (m *marks) UnsetMarkByValue(d *Mark) bool {
-	i := m.indexByValueLast(d)
-	if i == -1 {
-		return false
+// AdjustForInsertion updates the mark position after text insertion.
+// insertStart: insertion start position
+// insertEnd: insertion end position after insertion
+func (m *Mark) AdjustForInsertion(insertStart, insertEnd editbuffer.Cursor) {
+	// If the mark is located before the insertion row,
+	// its position is unaffected.
+	if m == nil || m.RowIndex < insertStart.RowIndex {
+		return
 	}
 
-	*m = append((*m)[:i], (*m)[i+1:]...)
-	return true
-}
+	// Number of rows added by the insertion.
+	rowOffset := insertEnd.RowIndex - insertStart.RowIndex
 
-func (m *marks) Prev(d *Mark) *Mark {
-	i := m.indexByPointer(d)
-	if i <= 0 {
-		return nil
-	}
-	return (*m)[i-1]
-}
+	// Mark is on the same row as insertion start.
+	if m.RowIndex == insertStart.RowIndex {
+		// Only adjust when insertion occurs before or at the mark position.
+		if m.ColIndex >= insertStart.ColIndex {
 
-func (m *marks) Next(d *Mark) *Mark {
-	i := m.indexByPointer(d)
-	if i < 0 || i >= len(*m)-1 {
-		return nil
-	}
-	return (*m)[i+1]
-}
-
-func (m *marks) FindLastByFile(ff *editbuffer.EditBuffer) *Mark {
-	for i := len(*m) - 1; i >= 0; i-- {
-		if (*m)[i].File == ff {
-			return (*m)[i]
-		}
-	}
-	return nil
-}
-
-// indexByPointer finds index by identity
-func (m *marks) indexByPointer(d *Mark) int {
-	for i := range *m {
-		if d == (*m)[i] {
-			return i
-		}
-	}
-	return -1
-}
-
-// indexByPointer のラッパー
-func (m *marks) HasMark(d *Mark) bool {
-	return m.indexByPointer(d) != -1
-}
-
-// indexByValueLast finds last index by value equality
-func (m *marks) indexByValueLast(d *Mark) int {
-	for i := len(*m) - 1; i >= 0; i-- {
-		if m.equal(d, (*m)[i]) {
-			return i
-		}
-	}
-	return -1
-}
-
-func (m *marks) equal(a, b *Mark) bool {
-	if a.File != b.File {
-		return false
-	}
-	return a.RowIndex == b.RowIndex &&
-		a.ColIndex == b.ColIndex
-}
-
-func (m *marks) FilterByCharacters(chars string) marks {
-	items := marks{}
-	//gelog.Info("****** FilterByCharacters", "len", len(*m))
-	for i := len(*m) - 1; i >= 0; i-- {
-		mk := (*m)[i]
-		// text := fmt.Sprintf("%s %s", mk.File.GetPath(), utils.RemoveSymbols(mk.Content))
-		text := fmt.Sprintf("%s %s", mk.File.GetBase(), utils.RemoveSymbols(mk.Content))
-		// gelog.Info("FilterByCharacters", "text", text)
-		//gelog.Info("****** FilterByCharacters", "chars", chars, "text", text)
-		if chars != "" {
-			if utils.ContainsAllCharacters(text, chars) {
-				items = append(items, mk)
+			// Single-line insertion:
+			// shift only the column position.
+			if rowOffset == 0 {
+				m.ColIndex += insertEnd.ColIndex - insertStart.ColIndex
+			} else {
+				// Multi-line insertion:
+				// move the mark to the corresponding position
+				// in the inserted end row.
+				m.ColIndex = m.ColIndex - insertStart.ColIndex + insertEnd.ColIndex
+				m.RowIndex += rowOffset
 			}
-		} else {
-			items = append(items, mk)
 		}
+		return
 	}
-	//gelog.Info("FilterByCharacters", "chars", chars, "items", items)
-	//gelog.Info("FilterByCharacters", "chars", chars, "items", items)
-	return items
+
+	// Mark is below the insertion area:
+	// shift downward by the inserted row count.
+	m.RowIndex += rowOffset
+}
+
+// AdjustForDeletion updates the mark position after text deletion.
+// deleteStart: deletion start position
+// deleteEnd: deletion end position
+func (m *Mark) AdjustForDeletion(deleteStart, deleteEnd editbuffer.Cursor) {
+	// If the mark is before the deletion start row,
+	// its position is unaffected.
+	if m == nil || m.RowIndex < deleteStart.RowIndex {
+		return
+	}
+
+	// Mark is on the same row as deletion start.
+	if m.RowIndex == deleteStart.RowIndex {
+
+		// If the mark is at or before the deletion start,
+		// no adjustment is needed.
+		if m.ColIndex <= deleteStart.ColIndex {
+			return
+		}
+
+		// Otherwise, move the mark to the deletion start.
+		m.ColIndex = deleteStart.ColIndex
+		return
+	}
+
+	// Mark is below the deleted range:
+	// shift upward by the number of removed rows.
+	if m.RowIndex > deleteEnd.RowIndex {
+		m.RowIndex -= deleteEnd.RowIndex - deleteStart.RowIndex
+		return
+	}
+
+	// Mark is inside the deleted range:
+	// move it to the deletion start position.
+	m.RowIndex = deleteStart.RowIndex
+	m.ColIndex = deleteStart.ColIndex
 }

@@ -69,5 +69,4 @@ func (c *Cursor) AdjustForInsertion(insertStart, insertEnd Cursor) {
 
 	// If the cursor is after the insertion row(s), increment the row index.
 	c.RowIndex += rowOffset
-	//return c
 }

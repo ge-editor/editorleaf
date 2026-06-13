@@ -18,6 +18,7 @@ import (
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/define"
 	"github.com/ge-editor/gecore/killbuffer"
+	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/gelog"
 	"github.com/ge-editor/locale"
 	"github.com/ge-editor/theme"
@@ -73,33 +74,40 @@ func (e *Editorleaf) SaveFile() {
 	}
 
 	result, err := e.editBuffer.Save()
-	// if IsErrorCode(err, editbuffer.ErrSaved) {
-	if result&editbuffer.ResultSaved != 0 {
-		// if IsErrorCode(err, editbuffer.ErrFormatted) {
-		if result&editbuffer.ResultFormatted != 0 {
-			e.adjustFormattedCursorPosition()
-			e.bsArray.ClearAll()
-		}
-		// May need adjust cursor position if formatted content
-		rowLength := e.editBuffer.Rows().Length()
-		if e.meta.RowIndex >= rowLength {
-			e.meta.RowIndex = rowLength - 1
-		}
-		line := (*e.editBuffer.Rows())[e.meta.RowIndex]
-		colLength := len(line)
-		if e.meta.ColIndex >= colLength {
-			// cursor on newline or EOF
-			e.meta.ColIndex = colLength - 1
-		}
-		for !utf8.RuneStart(line[e.meta.ColIndex]) && e.meta.ColIndex > 0 {
-			e.meta.ColIndex--
-		}
-		gecore.Echo.AddText("Wrote " + e.editBuffer.GetPath() + backupMessage)
-	} else {
+	if result&editbuffer.ResultSaved == 0 {
 		gecore.Echo.AddText(err.Error() + backupMessage)
+		return
 	}
 
-	// e.UndoAction.MoveTo(e.RedoAction)
+	if result&editbuffer.ResultFormatted != 0 {
+		tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+			ed, ok := l.(*Editorleaf)
+			if !ok {
+				return
+			}
+
+			ed.adjustFormattedCursorPosition()
+			ed.bsArray.ClearAll()
+
+			// May need adjust cursor position if formatted content
+			rowLength := ed.editBuffer.Rows().Length()
+			if ed.meta.RowIndex >= rowLength {
+				ed.meta.RowIndex = rowLength - 1
+			}
+			line := (*ed.editBuffer.Rows())[ed.meta.RowIndex]
+			colLength := len(line)
+			if ed.meta.ColIndex >= colLength {
+				// cursor on newline or EOF
+				ed.meta.ColIndex = colLength - 1
+			}
+			for !utf8.RuneStart(line[ed.meta.ColIndex]) && ed.meta.ColIndex > 0 {
+				ed.meta.ColIndex--
+			}
+		})
+	}
+
+	gecore.Echo.AddText("Wrote " + e.editBuffer.GetPath() + backupMessage)
+
 	e.editBuffer.UndoAction.MarkSaved()
 }
 
@@ -166,8 +174,8 @@ func (e *Editorleaf) MoveCursorNextWord() {
 				break
 			}
 		}
-		//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
-		if e.isEndOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex) {
+		// if e.isEndOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex) {
+		if e.bsArray.IsEndOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex) {
 			y++
 			x = 0
 		} else {
@@ -178,16 +186,6 @@ func (e *Editorleaf) MoveCursorNextWord() {
 
 	e.meta.PrevCx = x
 	e.moveCursor(x, y)
-}
-
-func (e *Editorleaf) isEndOfLogicalRow(rowIndex, colIndex int) bool {
-	_, size := utf8.DecodeRune((*e.editBuffer.Rows())[rowIndex][colIndex:])
-	for i := 0; i < e.bsArray.BoundariesLen(rowIndex); i++ {
-		if colIndex+size == e.bsArray.Boundary(rowIndex, i).StopLogicalRowByteIndex {
-			return true
-		}
-	}
-	return false
 }
 
 func (e *Editorleaf) MoveCursorPreviousWord() {
@@ -214,10 +212,7 @@ func (e *Editorleaf) MoveCursorPreviousWord() {
 		notUppercaseBit := ^locale.UPPERCASE
 		for {
 			//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
-			before, ok := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
-			if !ok {
-				panic("1")
-			}
+			before := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 			ch, _, colIndex, ok := e.editBuffer.Rows().Row(e.meta.RowIndex).DecodePrevRune(e.meta.ColIndex)
 			if !ok {
 				// panic("2")
@@ -239,7 +234,7 @@ func (e *Editorleaf) MoveCursorPreviousWord() {
 				prevCc, cc = savePrevCC, saveCC
 			}
 			e.meta.ColIndex = colIndex
-			after, ok := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+			after := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 			if !ok {
 				panic("3")
 			}
@@ -295,7 +290,8 @@ func (e *Editorleaf) MoveCursorForward() {
 		}
 		// gelog.Info("MoveCursorForward %q, %d %d %v", ch, size, w, ok)
 		//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
-		if e.isEndOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex) {
+		// if e.isEndOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex) {
+		if e.bsArray.IsEndOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex) {
 			// gelog.Info("MoveCursorForward 3 %q %d,%d", ch, e.meta.RowIndex, e.meta.ColIndex)
 			y++
 			x = 0
@@ -333,10 +329,7 @@ func (e *Editorleaf) MoveCursorBackward() {
 		e.meta.ColIndex = colIndex     // lastBs.stopIndex - size
 	} else {
 		//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
-		before, ok := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
-		if !ok {
-			panic("1")
-		}
+		before := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 		// ch, _, colIndex, ok := e.Rows().DecodePrevRune(e.meta.RowIndex, e.meta.ColIndex)
 		ch, _, colIndex, ok := e.editBuffer.Rows().Row(e.meta.RowIndex).DecodePrevRune(e.meta.ColIndex)
 		if !ok {
@@ -344,7 +337,7 @@ func (e *Editorleaf) MoveCursorBackward() {
 		}
 		w := e.locale.RuneWidth(ch) // , e.meta.RowIndex, e.meta.ColIndex)
 		e.meta.ColIndex = colIndex
-		after, ok := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+		after := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 		if !ok {
 			panic("3")
 		}
@@ -369,7 +362,7 @@ func (e *Editorleaf) MoveCursorNextLine() {
 	var bo *Boundary
 
 	//e.makeAvailableBoundariesArray(e.meta.RowIndex)        // -------- !
-	if e.inEndOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex) { // last logical line
+	if e.bsArray.OnEndOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex) { // last logical line
 		if e.editBuffer.Rows().IsRowIndexLastRow(e.meta.RowIndex) {
 			gecore.Echo.AddText("End of buffer")
 			return
@@ -384,7 +377,7 @@ func (e *Editorleaf) MoveCursorNextLine() {
 		// move to next logical line
 		//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
 		// What index number in logic line?
-		i, _ := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+		i := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 		i++ // next logical line
 		// bo = e.bsay.Boundaries(e.meta.RowIndex)[i]
 		bo = e.bsArray.Boundary(e.meta.RowIndex, i)
@@ -415,7 +408,7 @@ func (e *Editorleaf) MoveCursorNextLine() {
 func (e *Editorleaf) MoveCursorPrevLine() {
 	// What index number in logic row?
 	//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
-	indexOfLogicalRow, _ := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+	indexOfLogicalRow := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 
 	var bo *Boundary
 	if indexOfLogicalRow == 0 { // first logical line
@@ -458,7 +451,7 @@ func (e *Editorleaf) MoveCursorPrevLine() {
 func (e *Editorleaf) MoveCursorEndOfLine() {
 	//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
 	// What index number in logic row?
-	indexOfLogicalRow, _ := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+	indexOfLogicalRow := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 
 	colLength := e.editBuffer.Rows().Row(e.meta.RowIndex).Length()
 	e.meta.ColIndex = colLength - 1
@@ -476,7 +469,7 @@ func (e *Editorleaf) MoveCursorEndOfLine() {
 func (e *Editorleaf) MoveCursorEndOfLogicalLine() {
 	//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
 	// What index number in logic row?
-	indexOfLogicalRow, _ := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+	indexOfLogicalRow := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 	//bs := e.bsay.Boundaries(e.meta.RowIndex)
 	// bs := &e.bsay[e.meta.RowIndex].boundaries
 	// bo := bs[indexOfLogicalRow]
@@ -504,7 +497,7 @@ func (e *Editorleaf) MoveCursorBeginningOfLine() {
 		return
 	}
 
-	nowIndexOfLogicalRow, _ := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+	nowIndexOfLogicalRow := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 	rows := e.editBuffer.Rows()
 	indentedIndex := 0
 	indentedWidth := 0
@@ -517,7 +510,7 @@ func (e *Editorleaf) MoveCursorBeginningOfLine() {
 		indentedWidth += w
 		indentedIndex += size
 	}
-	newIndexOfLogicalRow, _ := e.getIndexOfLogicalRow(e.meta.RowIndex, indentedIndex)
+	newIndexOfLogicalRow := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, indentedIndex)
 
 	if e.meta.ColIndex == 0 || indentedIndex < e.meta.ColIndex {
 		e.meta.ColIndex = indentedIndex
@@ -542,7 +535,7 @@ func (e *Editorleaf) MoveCursorBeginningOfLogicalLine() {
 	}
 
 	//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
-	nowIndexOfLogicalRow, _ := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+	nowIndexOfLogicalRow := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 	if nowIndexOfLogicalRow == 0 {
 		e.MoveCursorBeginningOfLine()
 		return
@@ -596,7 +589,7 @@ func (e *Editorleaf) MoveViewHalfForward() {
 	gecore.Echo.AddText("")
 
 	// What index is e.meta.ColIndex in the logical line?
-	indexOfLogicalRow, _ := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+	indexOfLogicalRow := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 
 	// Compute total, logicalRowLength, rowIndex and vl
 	total := -indexOfLogicalRow
@@ -642,7 +635,7 @@ func (e *Editorleaf) MoveViewHalfBackward( /* n int */ ) {
 
 	// What index number in logic row?
 	//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
-	indexOfLogicalRow, _ := e.getIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
+	indexOfLogicalRow := e.bsArray.GetIndexOfLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 
 	total := n
 	logicalRowLength := indexOfLogicalRow
@@ -722,13 +715,25 @@ func (e *Editorleaf) DeleteRuneBackward() {
 			return
 		}
 		// join to prev row
-		e.bsArray.rows = slices.Delete(e.bsArray.rows, start.RowIndex, start.RowIndex+1)
-		e.bsArray.Clear(start.RowIndex - 1)
+		tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+			ed, ok := l.(*Editorleaf)
+			if !ok {
+				return
+			}
+			ed.bsArray.Delete(start.RowIndex, start.RowIndex+1)
+			ed.bsArray.Clear(start.RowIndex - 1)
+		})
 		lines := e.editBuffer.Rows()
 		start.RowIndex--
 		start.ColIndex = len((*lines)[start.RowIndex]) - 1
 	} else {
-		e.bsArray.Clear(start.RowIndex)
+		tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+			ed, ok := l.(*Editorleaf)
+			if !ok {
+				return
+			}
+			ed.bsArray.Clear(start.RowIndex)
+		})
 		start.ColIndex = colIndex
 	}
 	removed := e.editBuffer.RemoveRegion(start, stop)
@@ -758,12 +763,24 @@ func (e *Editorleaf) DeleteRune() {
 
 	beRemovedCh, size, _ := e.editBuffer.Rows().Row(e.meta.RowIndex).DecodeRune(e.meta.ColIndex)
 	if beRemovedCh == '\n' {
-		e.bsArray.Clear(stop.RowIndex)
+		tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+			ed, ok := l.(*Editorleaf)
+			if !ok {
+				return
+			}
+			ed.bsArray.Clear(stop.RowIndex)
+			ed.bsArray.Delete(stop.RowIndex+1, stop.RowIndex+2)
+		})
 		stop.RowIndex++
 		stop.ColIndex = 0
-		e.bsArray.rows = slices.Delete(e.bsArray.rows, stop.RowIndex, stop.RowIndex+1)
 	} else {
-		e.bsArray.Clear(stop.RowIndex)
+		tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+			ed, ok := l.(*Editorleaf)
+			if !ok {
+				return
+			}
+			ed.bsArray.Clear(stop.RowIndex)
+		})
 		stop.ColIndex += size
 	}
 	removed := e.editBuffer.RemoveRegion(start, stop)
@@ -821,16 +838,27 @@ func (e *Editorleaf) SetMarkAtCursor() {
 	gecore.Echo.AddText("Set mark")
 }
 
+var tmpMarkPos *mark.Mark
+
 func (e *Editorleaf) SwapCursorAndMark() {
-	m := Marks.FindLastByFile(e.editBuffer)
-	if m == nil {
-		gecore.Echo.AddText("The mark is not set now, so there is no region")
+	lastMark := Marks.FindLastByFile(e.editBuffer)
+	if lastMark == nil {
+		gecore.Echo.AddText("No mark set")
 		return
 	}
 
-	Marks.UnsetMarkByValue(m)
-	Marks.AddMark(mark.NewMark(e.editBuffer, e.meta.Cursor, e.getContentWidthoutSpecialCharactor(e.meta.Cursor, 20)))
-	e.meta.Cursor = m.Cursor
+	if lastMark.Cursor == e.meta.Cursor {
+		if tmpMarkPos != nil {
+			e.meta.Cursor = tmpMarkPos.Cursor
+			tmpMarkPos = nil
+			return
+		}
+		gecore.Echo.AddText("Already at the last mark")
+		return
+	} else {
+		tmpMarkPos = mark.NewMark(e.editBuffer, e.meta.Cursor, e.getContentWidthoutSpecialCharactor(e.meta.Cursor, 20))
+		e.meta.Cursor = lastMark.Cursor
+	}
 }
 
 func (e *Editorleaf) FilterByCharacters(chars string) []*mark.Mark {
@@ -891,8 +919,14 @@ func (e *Editorleaf) killRegion(start, stop editbuffer.Cursor) {
 		return
 	}
 
-	e.bsArray.rows = slices.Delete(e.bsArray.rows, start.RowIndex+1, stop.RowIndex+1)
-	e.bsArray.Clear(start.RowIndex)
+	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+		ed, ok := l.(*Editorleaf)
+		if !ok {
+			return
+		}
+		ed.bsArray.Delete(start.RowIndex+1, stop.RowIndex+1)
+		ed.bsArray.Clear(start.RowIndex)
+	})
 
 	//e.makeAvailableBoundariesArray(start.RowIndex) // -------- !
 	/*
@@ -956,7 +990,13 @@ func (e Editorleaf) BackwardKillLine() {
 	}
 
 	// gelog.Info("removed", "'"+string(*removed)+"'")
-	e.bsArray.Clear(e.meta.Cursor.RowIndex)
+	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+		ed, ok := l.(*Editorleaf)
+		if !ok {
+			return
+		}
+		ed.bsArray.Clear(e.meta.Cursor.RowIndex)
+	})
 
 	e.syncCursorAndBufferForEdit(DELETE, start, e.meta.Cursor)
 
@@ -1002,7 +1042,14 @@ func (e *Editorleaf) KillLine() {
 		return
 	}
 
-	e.bsArray.Clear(e.meta.RowIndex)
+	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+		ed, ok := l.(*Editorleaf)
+		if !ok {
+			return
+		}
+		ed.bsArray.Clear(e.meta.RowIndex)
+	})
+
 	// gecore.Echo.AddText(fmt.Sprintf("KillLine %d:%d", start.RowIndex+1, stop.RowIndex+1))
 	//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
 	/*
@@ -1062,8 +1109,14 @@ func (e *Editorleaf) Undo() {
 			//if count := a.After.RowIndex - a.Before.RowIndex; count > 0 {
 			if data != nil {
 				count := a.After.RowIndex - a.Before.RowIndex
-				e.bsArray.Delete(a.Before.RowIndex+1, count)
-				e.bsArray.Clear(a.Before.RowIndex)
+				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+					ed, ok := l.(*Editorleaf)
+					if !ok {
+						return
+					}
+					ed.bsArray.Delete(a.Before.RowIndex+1, count)
+					ed.bsArray.Clear(a.Before.RowIndex)
+				})
 			}
 
 			e.syncCursorAndBufferForEdit(DELETE, a.Before, a.After)
@@ -1103,8 +1156,14 @@ func (e *Editorleaf) Redo() {
 			// if count := a.Before.RowIndex - a.After.RowIndex; count > 0 {
 			if data != nil {
 				count := a.Before.RowIndex - a.After.RowIndex
-				e.bsArray.Delete(a.After.RowIndex+1, count)
-				e.bsArray.Clear(a.After.RowIndex)
+				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+					ed, ok := l.(*Editorleaf)
+					if !ok {
+						return
+					}
+					ed.bsArray.Delete(a.After.RowIndex+1, count)
+					ed.bsArray.Clear(a.After.RowIndex)
+				})
 			}
 
 			e.syncCursorAndBufferForEdit(DELETE, a.After, a.Before)
@@ -1123,8 +1182,14 @@ func (e *Editorleaf) Redo() {
 			// if count := cursor.RowIndex - a.Before.RowIndex; count > 0 {
 			if data != nil {
 				count := cursor.RowIndex - a.Before.RowIndex
-				e.bsArray.Delete(a.Before.RowIndex+1, count)
-				e.bsArray.Clear(a.Before.RowIndex)
+				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+					ed, ok := l.(*Editorleaf)
+					if !ok {
+						return
+					}
+					ed.bsArray.Delete(a.Before.RowIndex+1, count)
+					ed.bsArray.Clear(a.Before.RowIndex)
+				})
 			}
 
 			e.syncCursorAndBufferForEdit(DELETE, a.Before, cursor)
@@ -1342,7 +1407,13 @@ func (e *Editorleaf) CharInfo() {
 
 // insertBytes は、バイトスライスを現在のカーソル位置に挿入し、カーソルを前進させます。
 func (e *Editorleaf) insertBytes(bytes []byte, enableUndo bool) {
-	e.bsArray.Clear(e.meta.RowIndex)
+	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+		ed, ok := l.(*Editorleaf)
+		if !ok {
+			return
+		}
+		ed.bsArray.Clear(e.meta.RowIndex)
+	})
 
 	beforeCursor := e.meta.Cursor
 	bytesArray := editbuffer.SplitByLF(bytes)
@@ -1365,7 +1436,13 @@ func (e *Editorleaf) insertBytes(bytes []byte, enableUndo bool) {
 
 			//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
 			e.meta.RowIndex++
-			e.bsArray.Insert(e.meta.RowIndex, 1)
+			tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+				ed, ok := l.(*Editorleaf)
+				if !ok {
+					return
+				}
+				ed.bsArray.Insert(e.meta.RowIndex, 1)
+			})
 			//e.makeAvailableBoundariesArray(e.meta.RowIndex) // -------- !
 			e.meta.ColIndex = 0
 			e.meta.Cy += 1
@@ -1519,7 +1596,13 @@ func (e *Editorleaf) CommandPalette(s string) {
 
 func (e Editorleaf) SetRows(r [][]byte) {
 	e.editBuffer.SetRows(r)
-	e.bsArray.ClearAll()
+	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+		ed, ok := l.(*Editorleaf)
+		if !ok {
+			return
+		}
+		ed.bsArray.ClearAll()
+	})
 }
 
 func (e Editorleaf) IsEndOfLine() bool {
@@ -1530,55 +1613,10 @@ func (e Editorleaf) IsEndOfLine() bool {
 /* func (e *Editorleaf) isEndOfLogicalRow(rowIndex, colIndex int) bool {
 	_, size := utf8.DecodeRune((*e.editBuffer.Rows())[rowIndex][colIndex:])
 	for i := 0; i < e.bsArray.BoundariesLen(rowIndex); i++ {
-		if colIndex+size == e.bsArray.Boundary(rowIndex, i).StopIndex {
+		if colIndex+size == e.bsArray.Boundary(rowIndex, i).StopLogicalRowByteIndex {
 			return true
 		}
 	}
 	return false
 }
 */
-
-// ------------------------------------------------------------------
-//
-// ------------------------------------------------------------------
-
-func removeRegion(rows *[][]byte, start, end editbuffer.Cursor) {
-	// Checked row index. The start position of the region is after the end position, or the end position is beyond the last line
-	if start.RowIndex > end.RowIndex || end.RowIndex >= len(*rows) {
-		return
-	}
-	if start.RowIndex == end.RowIndex && start.ColIndex >= end.ColIndex {
-		return
-	}
-
-	topRow := &(*rows)[start.RowIndex]
-	// Checked col index. The start position of the region is the right of newline or EOF
-	if start.ColIndex >= len(*topRow) {
-		return
-	}
-
-	bottomRow := &(*rows)[end.RowIndex]
-	// Checked col index. The end position of the region is the right of newline or EOF
-	if end.ColIndex >= len(*bottomRow) { // EOF
-		return
-	}
-
-	if start.RowIndex == end.RowIndex {
-		// *topRow = delete(topRow, start.ColIndex, end.ColIndex)
-		*topRow = slices.Delete(
-			*topRow,
-			start.ColIndex,
-			end.ColIndex, // これでいいか？
-		)
-		return
-	}
-
-	// top row
-	*topRow = (*topRow)[:start.ColIndex]
-	// bottom row
-	// Remove middle and bottom rows
-	*topRow = append(*topRow, (*bottomRow)[end.ColIndex:]...)
-	if end.RowIndex-start.RowIndex > 0 { // 常に true?
-		*rows = slices.Delete(*rows, start.RowIndex+1, end.RowIndex+1)
-	}
-}
