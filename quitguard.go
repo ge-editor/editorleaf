@@ -50,8 +50,9 @@ func (qg *quitGuard) WillEnter() {
 	qg.ConfirmFunc()
 }
 func (qg *quitGuard) WillExit() {}
-func (qg *quitGuard) Draw() {
+func (qg *quitGuard) Draw() bool {
 	qg.MinibufferManager.Draw(screen.Get().Screen)
+	return false
 }
 
 func (qg *quitGuard) ConfirmFunc() {

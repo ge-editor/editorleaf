@@ -15,6 +15,7 @@ import (
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/define"
 	"github.com/ge-editor/gecore/screen"
+	"github.com/ge-editor/gecore/styleresolver"
 	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/gelog"
 	"github.com/ge-editor/keychord"
@@ -52,8 +53,15 @@ func newEditorLeaf() *Editorleaf {
 		meta:       (*BufferSets)[0].PopMeta(),
 		mode:       ModeEditor,
 		locale:     locale.New(),
+
+		styleResolver:       styleresolver.New(),
+		searchResolver:      &search.SearchResolver{},
+		specialCharResolver: &styleresolver.SpecialCharResolver{},
 	}
 	e.bsArray = NewBoundariesArray(e)
+
+	e.styleResolver.Add(&search.SearchResolver{})
+	e.styleResolver.Add(&styleresolver.SpecialCharResolver{})
 
 	return e
 }
@@ -85,6 +93,10 @@ type Editorleaf struct {
 	lineNumberWidth int
 
 	locale locale.Locale // Locale interface
+
+	styleResolver       *styleresolver.Manager
+	searchResolver      *search.SearchResolver
+	specialCharResolver *styleresolver.SpecialCharResolver
 }
 
 func (e *Editorleaf) SetKeyDispatcher(km *keychord.RootNode) {
@@ -133,9 +145,12 @@ func (e *Editorleaf) Resize(viewArea utils.Rect) {
 	e.bsArray.ClearAll()
 }
 
-func (e *Editorleaf) Draw() {
-	e.drawEditorleaf()
+func (e *Editorleaf) Draw() bool {
+	if e.drawEditorleaf() {
+		return true
+	}
 	e.drawRightBar()
+	return false
 }
 
 func (e *Editorleaf) Kill(leaf tree.Leaf, isActive bool) tree.Leaf {
@@ -221,7 +236,7 @@ const (
 )
 
 // syncEdits adjusts cursor positions and buffer boundaries based on the type of edit (insert or delete).
-func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbuffer.Cursor) {
+func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end screen.Cursor) {
 	// Ensure start is before end; swap if necessary.
 	if start.RowIndex > end.RowIndex || (start.RowIndex == end.RowIndex && start.ColIndex > end.ColIndex) {
 		start, end = end, start
@@ -261,8 +276,6 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 	}
 
 	// Synchronize cursor positions and buffer boundaries in other editors linked to the same file.
-	// leaves := tree.GetLeafTypeByRegisterName("editorleaf")
-	// for _, leaf := range leaves {
 	tree.GetRootTree().ForEachLeaf(func(leaf tree.Leaf) {
 		editor, ok := leaf.(*Editorleaf)
 		if !ok {
@@ -516,7 +529,7 @@ func (e *Editorleaf) drawRightBar() {
 }
 
 // Draw the screen based on Editor.currentRowIndex, logical row position logicalCY, and cursor position Editor.Cy
-func (e *Editorleaf) drawEditorleaf() {
+func (e *Editorleaf) drawEditorleaf() bool {
 
 	if e.mode == ModeEditor {
 		lineNumberWidth := digitsScreenWidth(e.RowsLength()) + 1
@@ -539,7 +552,10 @@ func (e *Editorleaf) drawEditorleaf() {
 
 	// Cursor position in logical row
 	if e.bsArray.NeedsReparse(e.meta.RowIndex) {
-		e.drawLineWithCompute(0, e.meta.RowIndex, -1, false, foundPositionIndex, foundPositionIndexes)
+		_, canceled := e.drawLineWithCompute(0, e.meta.RowIndex, -1, false, foundPositionIndex, foundPositionIndexes)
+		if canceled {
+			return true
+		}
 	} else {
 		gelog.Debug("not call compute")
 	}
@@ -557,7 +573,10 @@ func (e *Editorleaf) drawEditorleaf() {
 			}
 
 			if e.bsArray.NeedsReparse(rowIndex) {
-				e.drawLineWithCompute(0, rowIndex, -1, false, foundPositionIndex, foundPositionIndexes)
+				_, canceled := e.drawLineWithCompute(0, rowIndex, -1, false, foundPositionIndex, foundPositionIndexes)
+				if canceled {
+					return true
+				}
 			}
 			totalLogicalRowIfInHeight += e.bsArray.BoundariesLen(rowIndex)
 
@@ -599,19 +618,31 @@ func (e *Editorleaf) drawEditorleaf() {
 	y := Cy - Lcy
 	// gecore.Echo.AddText(fmt.Sprintf("(rowIndex:%d, y:%d)", rowIndex, y))
 	if e.bsArray.NeedsReparse(rowIndex) {
-		e.drawLineWithCompute(y, rowIndex, Lcy, true, -1, foundPositionIndexes)
+		_, canceled := e.drawLineWithCompute(y, rowIndex, Lcy, true, -1, foundPositionIndexes)
+		if canceled {
+			return true
+		}
 	} else {
-		e.drawLine(y, rowIndex, Lcy, -1, foundPositionIndexes)
+		_, canceled := e.drawLine(y, rowIndex, Lcy, -1, foundPositionIndexes)
+		if canceled {
+			return true
+		}
 	}
 
 	// From the cursor position to up
 	rowIndex--
 	for ; rowIndex >= 0 && y >= 0; rowIndex-- {
 		if e.bsArray.NeedsReparse(rowIndex) {
-			e.drawLineWithCompute(y, rowIndex, -1, false, -1, foundPositionIndexes)
+			_, canceled := e.drawLineWithCompute(y, rowIndex, -1, false, -1, foundPositionIndexes)
+			if canceled {
+				return true
+			}
 		}
 		y -= e.bsArray.BoundariesLen(rowIndex)
-		e.drawLine(y, rowIndex, -1, -1, foundPositionIndexes)
+		_, canceled := e.drawLine(y, rowIndex, -1, -1, foundPositionIndexes)
+		if canceled {
+			return true
+		}
 	}
 
 	// From the cursor position to down
@@ -620,9 +651,15 @@ func (e *Editorleaf) drawEditorleaf() {
 	rowIndex++
 	for ; rowIndex < e.RowsLength() && y < Height; rowIndex++ {
 		if e.bsArray.NeedsReparse(rowIndex) {
-			e.drawLineWithCompute(y, rowIndex, -1, true, -1, foundPositionIndexes)
+			_, canceled := e.drawLineWithCompute(y, rowIndex, -1, true, -1, foundPositionIndexes)
+			if canceled {
+				return true
+			}
 		} else {
-			e.drawLine(y, rowIndex, -1, -1, foundPositionIndexes)
+			_, canceled := e.drawLine(y, rowIndex, -1, -1, foundPositionIndexes)
+			if canceled {
+				return true
+			}
 		}
 		y += e.bsArray.BoundariesLen(rowIndex)
 	}
@@ -661,6 +698,8 @@ func (e *Editorleaf) drawEditorleaf() {
 	}
 	e.drawModeline()
 	// e.screen.Echo(fmt.Sprintf("line: %d:%d-%d", e.StartDrawRowIndex, e.StartDrawLogicalIndex, e.EndDrawRowIndex))
+
+	return false
 }
 
 // isCursorInRange checks if the cursor position (row, col) is within the range
@@ -785,7 +824,7 @@ func (e *Editorleaf) drawLineWithCompute(
 	startScreenY, rowIndex, cursorLogicalCY int,
 	isDraw bool,
 	foundPositionIndex int, foundIndexes []search.FoundPosition,
-) int {
+) (int, bool) {
 	// 右端から 折り返し候補を探す探索マージン
 	const rightEdgeWrapMargin = 8 // Search margin from the right edge for wrap candidates.
 	const PageLineCount = 60      // will language に移動する
@@ -820,7 +859,23 @@ func (e *Editorleaf) drawLineWithCompute(
 		return sy == cursorLineY
 	}
 
+	ctx := e.parentLeafType.CancelManager().Get("draw")
+	if ctx == nil {
+		return -1, true
+	}
+
 	for bytePosOfRow := 0; bytePosOfRow < rowBytes; {
+		select {
+		case <-ctx.Done():
+			// if isDraw {
+			gelog.Debug("Cancel drawLineWithCompute")
+			gecore.Echo.AddText("Cancel drawLineWithCompute")
+			e.bsArray.Clear(rowIndex)
+			return -1, true // canceled
+			//}
+		default:
+		}
+
 		wrapped := false
 		currentCell.Style = theme.ColorDefault
 
@@ -833,6 +888,18 @@ func (e *Editorleaf) drawLineWithCompute(
 		}
 		currentCell.Width = utils.RuneWidth(currentCell.Ch)
 		currentCell.Class = e.locale.GetCharClass(currentCell.Ch)
+
+		// Style
+		e.styleResolver.Resolve(&styleresolver.Context{
+			RowIndex:        rowIndex,
+			ColIndex:        bytePosOfRow,
+			Cursor:          e.meta.Cursor,
+			IsCursorLine:    false,
+			IsCursorEnabled: false,
+			IsLastAtRow:     false,
+			IsEndRow:        false,
+			Cell:            currentCell,
+		}, theme.ColorDefault)
 
 		// Special char width
 		if currentCell.Ch == define.EOF && isLastCh && isEndOfRow {
@@ -1096,13 +1163,13 @@ func (e *Editorleaf) drawLineWithCompute(
 
 	//
 	e.bsArray.Set(rowIndex, bo, hangingIndentWidth, runeWidth)
-	return sy - startScreenY
+	return sy - startScreenY, false
 }
 
 func (e *Editorleaf) drawLine(
 	startScreenY, rowIndex, cursorLogicalCY int,
 	foundPositionIndex int, foundIndexes []search.FoundPosition,
-) int {
+) (int, bool) {
 	const PageLineCount = 60 // will language に移動する
 
 	contentWidth := e.editArea.Width - e.lineNumberWidth
@@ -1120,7 +1187,7 @@ func (e *Editorleaf) drawLine(
 	}
 
 	if startLogicalRowIndex >= logicalRowLen {
-		return 0
+		return 0, false
 	}
 
 	hangingIndentWidth := e.bsArray.rows[rowIndex].HangingIndentWidth
@@ -1136,7 +1203,22 @@ func (e *Editorleaf) drawLine(
 
 	runeWidthCache := e.bsArray.rows[rowIndex].RuneWidthCache
 
+	ctx := e.parentLeafType.CancelManager().Get("draw")
+	if ctx == nil {
+		return -1, true
+	}
+
 	for logicalRowIndex := startLogicalRowIndex; logicalRowIndex < logicalRowLen; logicalRowIndex++ {
+
+		select {
+		case <-ctx.Done():
+			gelog.Debug("Cancel drawLine")
+			gecore.Echo.AddText("Cancel drawLine")
+			return -1, true
+		default:
+		}
+		// <-time.After(500 * time.Microsecond)
+
 		underline := sy == cursorLineY
 
 		// Fill Hanging Indent Width
@@ -1203,7 +1285,7 @@ func (e *Editorleaf) drawLine(
 		e.drawLineNumber(rowIndex, startScreenY, cursorLineY, logicalRowLen, PageLineCount)
 	}
 
-	return sy - startScreenY
+	return sy - startScreenY, false
 }
 
 func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, h int /* bo []Boundary */, PageLineCount int) {

@@ -163,14 +163,15 @@ func (m *MinibufferManagerStruct) MinibufferResize(overlayRect utils.Rect) int {
 	return height
 }
 
-func (m *MinibufferManagerStruct) Draw(s tcell.Screen) {
+func (m *MinibufferManagerStruct) Draw(s tcell.Screen) bool {
 	if !m.active {
-		return
+		return false
 	}
 
 	screen.Get().FillRect(m.overlayRect, 0, theme.ColorDefault)
 	screen.Get().DrawLabel(m.overlayRect, &screen.LabelParams{Style: theme.ColorDefault}, m.session.Prompt)
 	m.session.Editor.Draw()
+	return false
 }
 
 func (m *MinibufferManagerStruct) UniversalCancel() {

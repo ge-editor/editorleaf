@@ -16,6 +16,7 @@ import (
 	"github.com/ge-editor/editorleaf/editbuffer/rows"
 	"github.com/ge-editor/gecore/define"
 	"github.com/ge-editor/gecore/lang"
+	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/utils"
 )
 
@@ -141,17 +142,17 @@ func (eb *EditBuffer) ChangePath(path string) {
 }
 
 // No undo/redo functionality
-func (eb *EditBuffer) RemoveRegion(cursor1, cursor2 Cursor) *[]byte {
+func (eb *EditBuffer) RemoveRegion(cursor1, cursor2 screen.Cursor) *[]byte {
 	return eb.removeRegion(cursor1, cursor2, true)
 }
 
 // No undo/redo functionality
-func (eb *EditBuffer) GetRegion(cursor1, cursor2 Cursor) *[]byte {
+func (eb *EditBuffer) GetRegion(cursor1, cursor2 screen.Cursor) *[]byte {
 	return eb.removeRegion(cursor1, cursor2, false)
 }
 
 // Not within undo/redo functionality
-func (eb *EditBuffer) removeRegion(start, end Cursor, doRemove bool) *[]byte {
+func (eb *EditBuffer) removeRegion(start, end screen.Cursor, doRemove bool) *[]byte {
 	// Checked row index. The start position of the region is after the end position, or the end position is beyond the last line
 	if start.RowIndex > end.RowIndex || end.RowIndex >= eb.RowsLength() {
 		return nil

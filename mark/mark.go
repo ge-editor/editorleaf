@@ -2,9 +2,10 @@ package mark
 
 import (
 	"github.com/ge-editor/editorleaf/editbuffer"
+	"github.com/ge-editor/gecore/screen"
 )
 
-func NewMark(ff *editbuffer.EditBuffer, current editbuffer.Cursor, content string) *Mark {
+func NewMark(ff *editbuffer.EditBuffer, current screen.Cursor, content string) *Mark {
 	return &Mark{
 		File:    ff,
 		Cursor:  current,
@@ -14,14 +15,14 @@ func NewMark(ff *editbuffer.EditBuffer, current editbuffer.Cursor, content strin
 
 type Mark struct {
 	File *editbuffer.EditBuffer
-	editbuffer.Cursor
+	screen.Cursor
 	Content string
 }
 
 // AdjustForInsertion updates the mark position after text insertion.
 // insertStart: insertion start position
 // insertEnd: insertion end position after insertion
-func (m *Mark) AdjustForInsertion(insertStart, insertEnd editbuffer.Cursor) {
+func (m *Mark) AdjustForInsertion(insertStart, insertEnd screen.Cursor) {
 	// If the mark is located before the insertion row,
 	// its position is unaffected.
 	if m == nil || m.RowIndex < insertStart.RowIndex {
@@ -59,7 +60,7 @@ func (m *Mark) AdjustForInsertion(insertStart, insertEnd editbuffer.Cursor) {
 // AdjustForDeletion updates the mark position after text deletion.
 // deleteStart: deletion start position
 // deleteEnd: deletion end position
-func (m *Mark) AdjustForDeletion(deleteStart, deleteEnd editbuffer.Cursor) {
+func (m *Mark) AdjustForDeletion(deleteStart, deleteEnd screen.Cursor) {
 	// If the mark is before the deletion start row,
 	// its position is unaffected.
 	if m == nil || m.RowIndex < deleteStart.RowIndex {

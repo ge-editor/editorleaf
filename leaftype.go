@@ -1,6 +1,7 @@
 package editorleaf
 
 import (
+	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/keychord"
@@ -19,19 +20,20 @@ func NewLeafType(bind EditorKeymapBinder) *LeafType {
 type LeafType struct {
 	name       string
 	bindKeymap EditorKeymapBinder
+	ctx        tree.LeafContext
 }
 
 // Return *editorleaf.Editor as tree.Leaf *interface
 // Editor が生成されたタイミングで keymap を作成してバインドする
-func (v *LeafType) NewLeaf() tree.Leaf {
+func (l *LeafType) NewLeaf() tree.Leaf {
 	editor := newEditorLeaf()
-	editor.parentLeafType = v
+	editor.parentLeafType = l
 	editor.screen = screen.Get()
 
 	// Editor が生成されたタイミングで keymap を作成してバインド
 	km := keychord.NewRootNode()
-	if v.bindKeymap != nil {
-		v.bindKeymap(km, editor)
+	if l.bindKeymap != nil {
+		l.bindKeymap(km, editor)
 	}
 	editor.SetKeyDispatcher(km)
 
@@ -41,15 +43,15 @@ func (v *LeafType) NewLeaf() tree.Leaf {
 
 // Create a new tree.Leaf (Editor) from leaf *tree.Leaf information
 // direction: "right", "bottom"
-func (v *LeafType) NewSiblingLeaf(direction string, leaf tree.Leaf) tree.Leaf {
+func (l *LeafType) NewSiblingLeaf(direction string, leaf tree.Leaf) tree.Leaf {
 	newEditor := newEditorLeaf()
-	newEditor.parentLeafType = v
+	newEditor.parentLeafType = l
 	newEditor.screen = screen.Get()
 
 	// Editor が生成されたタイミングで keymap を作成してバインド
 	km := keychord.NewRootNode()
-	if v.bindKeymap != nil {
-		v.bindKeymap(km, newEditor)
+	if l.bindKeymap != nil {
+		l.bindKeymap(km, newEditor)
 	}
 	newEditor.SetKeyDispatcher(km)
 
@@ -63,8 +65,26 @@ func (v *LeafType) NewSiblingLeaf(direction string, leaf tree.Leaf) tree.Leaf {
 	return tl
 }
 
-func (v *LeafType) Name() string {
-	return v.name
+func (l *LeafType) RealName() string {
+	return "github.com/ge-editor/editorleaf"
+}
+
+func (l *LeafType) Name() string {
+	return l.name
+}
+
+func (l *LeafType) SetRegisteredName(name string) {
+	l.name = name
+}
+
+func (l *LeafType) SetCtx(ctx *tree.LeafContext) {
+	l.ctx = *ctx
+
+	ctx.CancelManager.Rotate("draw").Done()
+}
+
+func (l *LeafType) CancelManager() *gecore.EventCancelManager {
+	return l.ctx.CancelManager // .Get("draw")
 }
 
 // MinibufferLeaf は tree に属さない

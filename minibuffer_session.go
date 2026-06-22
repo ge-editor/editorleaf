@@ -3,6 +3,7 @@
 package editorleaf
 
 import (
+	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/keychord"
 	"github.com/ge-editor/utils"
 )
@@ -31,6 +32,11 @@ func NewSession(
 	bind(km, editor)
 	editor.SetKeyDispatcher(km)
 	editor.Active(true)
+	// Not have parent leaf
+	editor.parentLeafType = tree.LeafTypes.GetDefaultLeafType()
+	editor.parentLeafType.SetCtx(&tree.LeafContext{
+		CancelManager: tree.ECM,
+	})
 
 	return &Session{
 		Editor:      editor,

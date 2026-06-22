@@ -1,9 +1,7 @@
 // editorleaf/search/search.go
 package search
 
-import (
-	"github.com/ge-editor/editorleaf/editbuffer"
-)
+import "github.com/ge-editor/gecore/screen"
 
 type SearchStruct struct {
 	CurrentSearchIndex int
@@ -23,8 +21,8 @@ func NewSearch() *SearchStruct {
 
 // Position found in search results
 type FoundPosition struct {
-	Start editbuffer.Cursor
-	Stop  editbuffer.Cursor
+	Start screen.Cursor
+	Stop  screen.Cursor
 }
 
 ///////////////////
@@ -32,11 +30,11 @@ type FoundPosition struct {
 
 func NewFoundPosition(startRowIndex, startColIndex, stopRowIndex, stopColIndex int) FoundPosition {
 	return FoundPosition{
-		Start: editbuffer.Cursor{
+		Start: screen.Cursor{
 			RowIndex: startRowIndex,
 			ColIndex: startColIndex,
 		},
-		Stop: editbuffer.Cursor{
+		Stop: screen.Cursor{
 			RowIndex: stopRowIndex,
 			ColIndex: stopColIndex,
 		},

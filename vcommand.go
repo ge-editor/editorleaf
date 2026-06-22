@@ -18,6 +18,7 @@ import (
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/define"
 	"github.com/ge-editor/gecore/killbuffer"
+	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/gelog"
 	"github.com/ge-editor/locale"
@@ -667,7 +668,7 @@ func (e *Editorleaf) MoveViewHalfBackward( /* n int */ ) {
 	e.meta.ColIndex, _ = e.getColumnIndexClosestToCursorXPosition(e.meta.RowIndex, indexOfLogicalRow, e.meta.PrevCx)
 }
 
-func (e *Editorleaf) MoveCursorToLine(lineNumber int) {
+func (e *Editorleaf) MoveCursorGoToLine(lineNumber int) {
 	if lineNumber < 1 || lineNumber > e.editBuffer.Rows().Length() {
 		return
 	}
@@ -870,7 +871,7 @@ func (e *Editorleaf) FilterByCharacters(chars string) []*mark.Mark {
 // ------------------------------------------------------------------
 
 // Copy region to kill buffer
-func (e *Editorleaf) copyRegion(a, b editbuffer.Cursor) error {
+func (e *Editorleaf) copyRegion(a, b screen.Cursor) error {
 	s := e.editBuffer.GetRegion(a, b)
 	if s == nil {
 		return nil
@@ -912,7 +913,7 @@ func (e *Editorleaf) CopyRegion() {
 
 // Delete start to stop bytes and push the bytes to undo-stack and kill-buffer
 // 開始から終了までのバイトを削除し、そのバイトを undo スタックと kill バッファにプッシュする
-func (e *Editorleaf) killRegion(start, stop editbuffer.Cursor) {
+func (e *Editorleaf) killRegion(start, stop screen.Cursor) {
 	e.meta.Cursor = start
 	removed := e.editBuffer.RemoveRegion(start, stop)
 	if removed == nil {
@@ -976,7 +977,7 @@ func (e Editorleaf) BackwardKillLine() {
 		return
 	}
 
-	start := editbuffer.Cursor{
+	start := screen.Cursor{
 		RowIndex: e.meta.Cursor.RowIndex,
 		ColIndex: 0,
 	}
@@ -1136,7 +1137,6 @@ func (e *Editorleaf) Undo() {
 	}
 
 	gecore.Echo.AddText("Undo!")
-	// e.RedoAction.Push(a)
 }
 
 func (e *Editorleaf) Redo() {
@@ -1371,8 +1371,8 @@ func (e *Editorleaf) ReplaceCurrentSearchString(str string) {
 		return
 	}
 	foundPosition := e.meta.Search.Indexes[e.meta.Search.CurrentSearchIndex]
-	e.killRegion(editbuffer.Cursor{RowIndex: foundPosition.Start.RowIndex, ColIndex: foundPosition.Start.ColIndex},
-		editbuffer.Cursor{RowIndex: foundPosition.Start.RowIndex, ColIndex: foundPosition.Stop.ColIndex})
+	e.killRegion(screen.Cursor{RowIndex: foundPosition.Start.RowIndex, ColIndex: foundPosition.Start.ColIndex},
+		screen.Cursor{RowIndex: foundPosition.Start.RowIndex, ColIndex: foundPosition.Stop.ColIndex})
 	e.InsertString(str)
 
 	// Correct the changed indexes within the same line where replacement is made
@@ -1495,7 +1495,7 @@ func (e *Editorleaf) getColumnIndexClosestToCursorXPosition(rowIndex, indexOfLog
 }
 
 // Return content widthout special charactor
-func (e *Editorleaf) getContentWidthoutSpecialCharactor(current editbuffer.Cursor, maxContentWidth int) (content string) {
+func (e *Editorleaf) getContentWidthoutSpecialCharactor(current screen.Cursor, maxContentWidth int) (content string) {
 	isSpecialChar := func(ch rune) bool {
 		return ch < 32 || ch == define.DEL || ch == '　' || ch == define.NO_BREAK_SPACE
 	}
@@ -1543,7 +1543,7 @@ func (e *Editorleaf) Recenter() {
 	e.meta.Cy = int(e.editArea.Height / 2)
 }
 
-func (e *Editorleaf) SetCursor(c editbuffer.Cursor) {
+func (e *Editorleaf) SetCursor(c screen.Cursor) {
 	e.meta.Cursor = c
 }
 
@@ -1590,7 +1590,7 @@ func (e *Editorleaf) CommandPalette(s string) {
 			gelog.Error(err.Error())
 			return
 		}
-		e.MoveCursorToLine(i)
+		e.MoveCursorGoToLine(i)
 	}
 }
 

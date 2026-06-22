@@ -4,15 +4,15 @@ import (
 	"path/filepath"
 
 	"github.com/ge-editor/editorleaf/buffer"
-	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/gecore"
+	"github.com/ge-editor/gecore/screen"
 )
 
 type fileState struct {
-	Cursor editbuffer.Cursor
+	Cursor screen.Cursor
 }
 
-func saveState(path string, c editbuffer.Cursor) {
+func saveState(path string, c screen.Cursor) {
 	absPath, _ := filepath.Abs(path)
 	gecore.AppState().Save(
 		"editor:"+absPath,

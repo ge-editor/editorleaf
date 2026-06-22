@@ -1,14 +1,14 @@
 package buffer
 
 import (
-	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/editorleaf/mark"
 	"github.com/ge-editor/editorleaf/search"
+	"github.com/ge-editor/gecore/screen"
 )
 
 func newMeta() *Meta {
 	return &Meta{
-		Cursor: editbuffer.Cursor{
+		Cursor: screen.Cursor{
 			RowIndex: 0,
 			ColIndex: 0,
 		},
@@ -26,7 +26,7 @@ func newMeta() *Meta {
 }
 
 type Meta struct {
-	editbuffer.Cursor
+	screen.Cursor
 	Cx                  int
 	Cy                  int
 	PrevCx              int                  // Horizontal position of the cursor when vertically moving the cursor

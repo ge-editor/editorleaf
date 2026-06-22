@@ -1,6 +1,9 @@
 package editbuffer
 
-import "github.com/ge-editor/utils"
+import (
+	"github.com/ge-editor/gecore/screen"
+	"github.com/ge-editor/utils"
+)
 
 // Undoable interface
 type Undoable interface {
@@ -19,8 +22,8 @@ const (
 // Smallest unit of an edit operation
 type EditAction struct {
 	Class  ActionClass
-	Before Cursor
-	After  Cursor
+	Before screen.Cursor
+	After  screen.Cursor
 	Data   []byte
 }
 
