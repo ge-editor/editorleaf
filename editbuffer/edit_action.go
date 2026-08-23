@@ -78,7 +78,8 @@ func (u *UndoStack) PushAction(a *EditAction) {
 		// If the previous action is the same class and cursor position,
 		// merge it into the last action instead of pushing a new one.
 		if prev, ok := u.stack[u.index-1].(*EditAction); ok {
-			if prev.Class == a.Class {
+			// 保存協会では無い事
+			if u.index != u.saveMark && prev.Class == a.Class {
 				if a.Class == DELETE_BACKWARD && a.Before.Equals(prev.After) {
 					utils.ReverseUTF8Bytes(a.Data)
 					prev.Data = append(a.Data, prev.Data...)

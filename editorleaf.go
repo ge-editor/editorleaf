@@ -143,6 +143,7 @@ func (e *Editorleaf) Resize(viewArea utils.Rect) {
 		e.verticalThreshold = utils.Threshold(verticalThreshold, e.editArea.Height)
 	}
 	e.bsArray.ClearAll()
+	e.Draw() // Need call self drawing
 }
 
 func (e *Editorleaf) Draw() bool {
