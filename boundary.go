@@ -6,6 +6,7 @@ import (
 
 	"github.com/ge-editor/editorleaf/search"
 	"github.com/ge-editor/gecore"
+	"github.com/ge-editor/gelog"
 	"github.com/ge-editor/locale"
 	"github.com/ge-editor/utils"
 )
@@ -17,12 +18,23 @@ import (
 // due to wrapping. Each Boundary describes one such segment.
 type Boundary struct {
 	// StartLogicalRowByteIndex is the inclusive start byte index
-	// within the original row.
+	// within the virtual row.
+	// The virtual row includes LF for non-final rows and EOF for
+	// the final row.
 	StartLogicalRowByteIndex int
 
 	// StopLogicalRowByteIndex is the exclusive end byte index
-	// within the original row.
+	// within the virtual row.
 	StopLogicalRowByteIndex int
+
+	/* 	// StartLogicalRowByteIndex is the inclusive start byte index
+	   	// within the original row.
+	   	StartLogicalRowByteIndex int
+
+	   	// StopLogicalRowByteIndex is the exclusive end byte index
+	   	// within the original row.
+	   	StopLogicalRowByteIndex int
+	*/
 
 	// LogicalRowWidth is the rendered width (in cells)
 	// of this logical row.
@@ -79,6 +91,11 @@ func NewBoundariesArray(editor *Editorleaf) BoundariesArray {
 	}
 }
 
+/* func (b *BoundariesArray) Editor() *Editorleaf {
+	return b.editor
+}
+*/
+
 // Len returns the number of rows currently stored.
 func (b *BoundariesArray) Len() int {
 	return len(b.rows)
@@ -106,6 +123,17 @@ func (b *BoundariesArray) Set(
 // (wrapped segments) for the specified physical row.
 func (b *BoundariesArray) BoundariesLen(rowIndex int) int {
 	b.beAvailable(rowIndex)
+
+	// 範囲外アクセス
+	if rowIndex >= len(b.rows) {
+		// 呼び出し元情報 + 指定インデックス + 実際の配列長を一緒に出力
+		err := fmt.Errorf("[INVALID INDEX] Called from %s | Target: [rowIndex:%d, colIndex:%d] | Actual limits: [rowsLen:%d, cacheLen:%d]", gelog.CallerInfo(), rowIndex, len(b.rows))
+		gelog.Error(err.Error())
+		gecore.Echo.AddText(err.Error())
+		panic(err)
+		// return 0 // 適切なエラー処理または初期値を返す
+	}
+
 	return len(b.rows[rowIndex].Boundaries)
 }
 
@@ -172,7 +200,17 @@ func (b *BoundariesArray) ClearAll() {
 	b.rows = nil
 }
 
-func (b *BoundariesArray) Clear(rowIndex int) {
+// ClearFrom clears all cached layout information from rowIndex onward.
+func (b *BoundariesArray) ClearFrom(rowIndex int) {
+	if rowIndex < 0 || rowIndex >= len(b.rows) {
+		return
+	}
+
+	b.rows = b.rows[:rowIndex]
+}
+
+// Clear clears the cached layout information for the specified row.
+func (b *BoundariesArray) ClearRow(rowIndex int) {
 	if len(b.rows) <= rowIndex {
 		return
 	}
@@ -182,9 +220,20 @@ func (b *BoundariesArray) Clear(rowIndex int) {
 // ------------------------------------------------------------------
 // Lazy evaluation support
 
-// NeedsReparse reports whether layout information for rowIndex
+// NeedsCompute reports whether layout information for rowIndex
 // needs to be recomputed.
-func (b *BoundariesArray) NeedsReparse(rowIndex int) bool {
+/* func (b *BoundariesArray) NeedsCompute(rowIndex int) bool {
+	if b == nil {
+		return true
+	}
+	if rowIndex < 0 || rowIndex >= len(b.rows) {
+		return true
+	}
+
+	return b.rows[rowIndex].Boundaries == nil
+} */
+
+func (b *BoundariesArray) NeedsCompute(rowIndex int) bool {
 	if b == nil {
 		return true
 	}
@@ -195,26 +244,65 @@ func (b *BoundariesArray) NeedsReparse(rowIndex int) bool {
 
 	row := b.rows[rowIndex]
 
-	if len(row.RuneWidthCache) != len(*b.editor.editBuffer.Rows().Row(rowIndex)) {
+	// これは、Rows バッファ初期状態における判定に有効です。
+	// 内容が比較されるわけではないので注意
+	// This check is useful for validating the initial state of the Rows buffer.
+	// It does not compare the actual row contents.
+	// RuneWidthCache always includes one extra entry for LF or EOF.
+	if len(row.RuneWidthCache) != b.editor.editBuffer.Rows.Row(rowIndex).Length()+1 {
 		return true
 	}
 
-	// nil = never parsed
-	return row.Boundaries == nil
+	return row.Boundaries == nil ||
+		row.RuneWidthCache == nil
 }
+
+/* func (b *BoundariesArray) Invalidate(rowIndex int) {
+	if b == nil {
+		return
+	}
+	if rowIndex < 0 || rowIndex >= len(b.rows) {
+		return
+	}
+
+	b.rows[rowIndex].Boundaries = nil
+	b.rows[rowIndex].RuneWidthCache = nil
+}
+*/
 
 // beAvailable ensures layout data for rowIndex is computed.
 func (b *BoundariesArray) beAvailable(rowIndex int) {
-	if b.NeedsReparse(rowIndex) {
+	if b.NeedsCompute(rowIndex) {
 		b.editor.drawLineWithCompute(
 			0, rowIndex, -1, false, -1, []search.FoundPosition{},
 		)
 	}
 }
 
+func (b *BoundariesArray) GetIndexOfLastLogicalRow(rowIndex int) int {
+	b.beAvailable(rowIndex)
+	return len(b.rows[rowIndex].Boundaries) - 1
+}
+
 // Returns the screen position of the cursor corresponding from cached array to the specified column index in logical rows.
 func (b *BoundariesArray) CursorPositionOnScreenLogicalRow(rowIndex, colIndex int) (lx, ly int) {
 	b.beAvailable(rowIndex)
+
+	// 範囲外アクセス
+	if b == nil ||
+		rowIndex < 0 ||
+		rowIndex >= len(b.rows) ||
+		colIndex < 0 ||
+		colIndex >= len(b.rows[rowIndex].RuneWidthCache) {
+
+		// 呼び出し元情報 + 指定インデックス + 実際の配列長を一緒に出力
+		err := fmt.Errorf("[INVALID INDEX] Called from %s | Target: [rowIndex:%d, colIndex:%d] | Actual limits: [rowsLen:%d, cacheLen:%d]", gelog.CallerInfo(), rowIndex, colIndex, len(b.rows), len(b.rows[rowIndex].RuneWidthCache))
+		gelog.Error(err.Error())
+		gecore.Echo.AddText(err.Error())
+		// return 0, 0 // 適切なエラー処理または初期値を返す
+		panic(err)
+	}
+
 	cell := b.rows[rowIndex].RuneWidthCache[colIndex]
 	return cell.TotalWidthLogicalRow, cell.LogicalRowIndex
 }

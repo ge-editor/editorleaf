@@ -7,10 +7,12 @@ import (
 	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/gecore/styleresolver"
+	"github.com/ge-editor/gelog"
 	"github.com/ge-editor/locale"
 )
 
 func newMinibuffer() *Editorleaf {
+	gelog.Debug("newMinibuffer")
 	eb := editbuffer.NewFile("*minibuffer*")
 	eb.New()
 	e := &Editorleaf{

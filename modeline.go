@@ -25,8 +25,7 @@ func (e *Editorleaf) drawModeline() {
 	s += fmt.Sprintf(`%s %s "%s"`, e.editBuffer.GetEncoding(), e.editBuffer.GetNewLine().String(), (*e.editBuffer.GetLangMode()).Name())
 
 	// char code
-	ch, _, _ := (*e).editBuffer.Rows().Row(e.meta.RowIndex).DecodeRune(e.meta.ColIndex)
-	str := e.RuneStatus(ch)
+	ch, str := e.CharInfoOnCursor(e.meta.Cursor)
 	s += fmt.Sprintf(" ('%s', %d, 0x%02X)", str, ch, ch)
 
 	a := theme.ColorModelineInactive

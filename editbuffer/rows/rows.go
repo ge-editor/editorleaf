@@ -2,168 +2,205 @@ package rows
 
 import (
 	"slices"
-	"unicode/utf8"
+	"strings"
 
 	"github.com/ge-editor/utils"
 )
 
-type row []byte
+type Rows []Row
 
-// Return the number of bytes in the row
-func (r *row) Length() int {
-	return len(*r)
+func New() *Rows {
+	r := make(Rows, 0, 64)
+	return &r
 }
 
-func (r *row) IsColIndexAtRowEnd(colIndex int) bool {
-	_, size := utf8.DecodeRune((*r)[colIndex:])
-	return len(*r) == colIndex+size
+// SetRows replaces the current rows.
+// The supplied rows are normalized so that row data does not contain
+// line separators.
+func (rs *Rows) SetRows(newRows Rows) {
+	*rs = newRows
 }
 
-func (r row) Bytes() []byte {
-	return r
-}
-
-func (r *row) SubBytes(col1, col2 int) []byte {
-	removed := make([]byte, col2-col1)
-	copy(removed, (*r)[col1:col2])
-	return removed
-}
-
-func (r *row) Delete(col1, col2 int) row {
-	return slices.Delete(*r, col1, col2)
-}
-
-// Add bytes to row
-func (r *row) Add(b []byte) {
-	*r = append(*r, b...)
-}
-
-// DecodeRune decodes a rune from the specified line and position
-func (r row) DecodeRune(colIndex int) (ch rune, size int, ok bool) {
-	if colIndex < 0 || colIndex >= len(r) {
-		return 0, 0, false
-	}
-	ch, size = utf8.DecodeRune(r[colIndex:])
-	// encoding is invalid
-	// if ch == utf8.RuneError && size == 1 {
-	// 許容する
-	if size == 0 {
-		return 0, 0, false
-	}
-	return ch, size, true
-}
-
-// DecodeRune decodes a rune from the specified line and position
-func (r *row) DecodeEndRune() (ch rune, size, colIndex int, ok bool) {
-	return r.DecodePrevRune(len(*r)) // +1
-}
-
-// DecodePrevRune decodes the previous rune from the specified line and position
-// i: colIndex
-func (r *row) DecodePrevRune(colIndex int) (ch rune, size, i int, ok bool) {
-	if colIndex <= 0 || colIndex > len((*r)) {
-		return 0, 0, 0, false
-	}
-	// Move back to find the start of the previous rune
-	i = colIndex - 1
-	for i >= 0 && !utf8.RuneStart((*r)[i]) {
-		i--
-	}
-	if i < 0 {
-		return 0, 0, 0, false
-	}
-	ch, size = utf8.DecodeRune((*r)[i:])
-	if ch == utf8.RuneError && size == 1 {
-		return 0, 0, 0, false
-	}
-	if colIndex-i != size {
-		return 0, 0, 0, false
-	}
-	return ch, size, i, true
-}
-
-// **********************************
-
-type RowsStruct struct {
-	rows [][]byte
-}
-
-// New creates a new buffer with an initial capacity of 64
-func New() *RowsStruct {
-	return &RowsStruct{
-		rows: make([][]byte, 0, 64),
-	}
-}
-
-func (rs *RowsStruct) Rows() *rows {
-	return (*rows)(&rs.rows)
-}
-
-func (rs *RowsStruct) SetRows(r rows) {
-	rs.rows = r
-}
-
-func (rs *RowsStruct) BytesArray() [][]byte {
-	return (*rs).rows
-}
-
-// return with remove EOF
-func (rs *RowsStruct) Bytes() ([]byte, []int, error) {
-	bytes, ints, err := utils.JoinBytes((*rs).rows)
-
-	if len(bytes) == 0 {
-		return bytes, ints, err
+// Clone returns a completely independent copy of the rows.
+//
+// Both the Rows slice and the byte data of each Row are copied,
+// so modifications to the returned rows do not affect the original.
+func (rs Rows) Clone() Rows {
+	if rs == nil {
+		return nil
 	}
 
-	return bytes[:len(bytes)-1], ints, err // remove EOF
+	cloned := make(Rows, len(rs))
+
+	for i, row := range rs {
+		if row == nil {
+			continue
+		}
+
+		cloned[i] = make(Row, len(row))
+		copy(cloned[i], row)
+	}
+
+	return cloned
 }
 
-// RowsLength returns the number of lines
-func (rs *RowsStruct) RowsLength() int {
-	return len((*rs).rows)
+func (rs Rows) Reversed() Rows {
+	result := make(Rows, len(rs))
+
+	for i := range rs {
+		result[len(rs)-1-i] = utils.ReverseUTF8Bytes(rs[i])
+	}
+
+	return result
 }
 
-// **********************************
+// SetBytesArray replaces the current rows from [][]byte.
+// Line separators are removed from each row.
+func (rs *Rows) SetBytesArray(source [][]byte) {
+	rows := make(Rows, 0, len(source))
 
-type rows [][]byte
+	for _, b := range source {
+		b = trimNewline(b)
+		rows = append(rows, Row(b))
+	}
 
-func (r *rows) Row(rowIndex int) *row {
-	return (*row)(&(*r)[rowIndex])
+	*rs = rows
+}
+
+func trimNewline(b []byte) []byte {
+	if len(b) >= 2 &&
+		b[len(b)-2] == 0x0d &&
+		b[len(b)-1] == 0x0a {
+		return b[:len(b)-2]
+	}
+
+	if len(b) > 0 {
+		switch b[len(b)-1] {
+		case 0x0a, 0x0d:
+			return b[:len(b)-1]
+		}
+	}
+
+	return b
+}
+
+// SetRow sets the content of a specific line by index
+func (rs *Rows) SetRow(rowIndex int, row []byte) bool {
+	if rowIndex < 0 || rowIndex >= len(*rs) {
+		return false
+	}
+	(*rs)[rowIndex] = row
+	return true
+}
+
+func (rs Rows) BytesArray() [][]byte {
+	b := make([][]byte, len(rs))
+	for i, r := range rs {
+		b[i] = []byte(r)
+	}
+	return b
+}
+
+func (rs *Rows) Row(rowIndex int) *Row {
+	if rowIndex < 0 || rowIndex >= len(*rs) {
+		return nil
+	}
+	return &(*rs)[rowIndex]
 }
 
 // AddRow adds a new []byte to the lines **slices**
-func (r *rows) Add(data []byte) {
-	*r = append(*r, data)
+func (rs *Rows) AddRow(data []byte) {
+	*rs = append(*rs, data)
+}
+
+// Join joins two Rows by concatenating the last row of rs
+// with the first row of r, then appending the remaining rows of r.
+//
+// For example:
+//
+//	rs: aa bb cc
+//	r:  dd ee
+//
+//	result: aa bb ccdd ee
+func (rs *Rows) Join(r Rows) {
+	if len(r) == 0 {
+		return
+	}
+	if len(*rs) == 0 {
+		*rs = append(*rs, r...)
+		return
+	}
+
+	last := len(*rs) - 1
+
+	// Join the last row of rs with the first row of r.
+	(*rs)[last] = append((*rs)[last], r[0]...)
+
+	// Append the remaining rows of r.
+	*rs = append(*rs, r[1:]...)
+}
+
+// Joined joins two Rows without modifying either of them.
+// It returns a new Rows containing the joined result.
+//
+// For example:
+//
+//	rs: aa bb cc
+//	r:  dd ee
+//
+//	result: aa bb ccdd ee
+func (rs Rows) Joined(r Rows) Rows {
+	if len(r) == 0 {
+		return append(Rows(nil), rs...)
+	}
+	if len(rs) == 0 {
+		return append(Rows(nil), r...)
+	}
+
+	result := make(Rows, 0, len(rs)+len(r)-1)
+	result = append(result, rs[:len(rs)-1]...)
+
+	// Join the last row of rs with the first row of r.
+	last := append(Row(nil), rs[len(rs)-1]...)
+	last = append(last, r[0]...)
+	result = append(result, last)
+
+	// Append the remaining rows of r.
+	result = append(result, r[1:]...)
+
+	return result
 }
 
 // delete rows[col1:col2]
-func (r *rows) Delete(col1, col2 int) {
-	*r = slices.Delete(*r, col1, col2)
+func (rs *Rows) Delete(col1, col2 int) {
+	*rs = slices.Delete(*rs, col1, col2)
 	// return slices.Delete(*r, col1, col2)
 }
 
 // InsertRow inserts a new line at the specified index
-func (r *rows) InsertRow(rowIndex int, row []byte) bool {
-	if rowIndex < 0 || rowIndex > len(*r) {
+func (rs *Rows) InsertRow(rowIndex int, row []byte) bool {
+	if rowIndex < 0 || rowIndex > len(*rs) {
 		return false
 	}
-	*r = slices.Insert(*r, rowIndex, row)
+	*rs = slices.Insert(*rs, rowIndex, row)
 	return true
 }
 
-// SetRow sets the content of a specific line by index
-func (r *rows) SetRow(rowIndex int, row []byte) bool {
-	if rowIndex < 0 || rowIndex >= len(*r) {
-		return false
+func (rs *Rows) Length() int {
+	return len(*rs)
+}
+
+func (rs Rows) IsRowIndexLastRow(rowIndex int) bool {
+	return rowIndex >= 0 && rowIndex == len(rs)-1
+}
+
+func (rs Rows) String(newline []byte) string {
+	var s strings.Builder
+
+	for _, r := range rs {
+		s.Write(r)
+		s.Write(newline)
 	}
-	(*r)[rowIndex] = row
-	return true
-}
 
-func (r *rows) Length() int {
-	return len(*r)
-}
-
-func (r *rows) IsRowIndexLastRow(rowIndex int) bool {
-	return len(*r)-1 == rowIndex
+	return s.String()
 }

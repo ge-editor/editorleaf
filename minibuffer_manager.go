@@ -1,12 +1,9 @@
 package editorleaf
 
 import (
-	"bytes"
-
 	"github.com/gdamore/tcell/v3"
 
 	"github.com/ge-editor/gecore"
-	"github.com/ge-editor/gecore/define"
 	"github.com/ge-editor/gecore/overlay"
 	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/keychord"
@@ -80,19 +77,11 @@ func (m *MinibufferManagerStruct) Editor() *Editorleaf {
 }
 
 // Return input content
-func (m *MinibufferManagerStruct) GetBytes() []byte {
+func (m *MinibufferManagerStruct) GetBytes() ([]byte, []int, error) {
 	if m.session == nil {
-		return nil
+		return nil, nil, nil
 	}
 	return m.session.Editor.GetBytes()
-}
-
-// Return input content
-func (m *MinibufferManagerStruct) GetString() string {
-	if m.session == nil {
-		return ""
-	}
-	return m.session.Editor.GetString()
 }
 
 func (m *MinibufferManagerStruct) SetPrompt(prompt string) {
@@ -115,8 +104,11 @@ func (m *MinibufferManagerStruct) SetBytes(content []byte) {
 	if m.session == nil {
 		return
 	}
-	rows := bytes.SplitAfter(append(content, define.EOF), []byte("\n"))
-	// gelog.Info("rows", rows)
+
+	rows, err := SplitRows(content)
+	if err != nil {
+		panic(err)
+	}
 	m.session.Editor.SetRows(rows)
 }
 

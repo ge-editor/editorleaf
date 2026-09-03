@@ -10,7 +10,6 @@ import (
 
 	"github.com/ge-editor/editorleaf/buffer"
 	"github.com/ge-editor/editorleaf/editbuffer"
-	"github.com/ge-editor/editorleaf/editbuffer/rows"
 	"github.com/ge-editor/editorleaf/mark"
 	"github.com/ge-editor/editorleaf/search"
 	"github.com/ge-editor/gecore"
@@ -121,25 +120,6 @@ func (e *Editorleaf) DispatchKey(ev tcell.EventKey) (string, keychord.KeyDispatc
 	}
 
 	return s, res
-}
-
-func (e *Editorleaf) DispatchMouse(ev tcell.EventMouse) /* (string, keychord.KeyDispatchTransition) */ {
-	// gelog.Info("e.keyDispatcher")
-
-	btn := ev.Buttons()
-	if btn&tcell.WheelDown != 0 {
-		// x, y := ev.Position()
-		/* _, y := ev.Position()
-		gelog.Debug("Mouse", "y", y)
-		if y > 0 {
-			e.MoveCursorNextLine()
-		} else {
-			e.MoveCursorPrevLine()
-		} */
-		// マウスホイール下回転処理
-		// -> 画面の表示開始行（ScrollTop）を +1〜3 行動かす
-		// x, y := ev.Position() を使ってマウスカーソル下の要素だけスクロールさせることも可能
-	}
 }
 
 // ------------------------------------------------------------------
@@ -430,13 +410,6 @@ func (e *Editorleaf) RuneStatus(ch rune) string {
 	}
 }
 
-func (e *Editorleaf) moveCursor(x, y int) {
-	e.meta.Cx = x
-	e.meta.Cy = y
-	gecore.Echo.AddText("")
-	e.showCursor(x, y)
-}
-
 // Use Editor.editArea as relative coordinates
 func (e *Editorleaf) showCursor(x, y int) {
 	_, iy := e.bsArray.CursorPositionOnScreenLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
@@ -559,11 +532,6 @@ func (e *Editorleaf) drawRightBar() {
 // Draw the screen based on Editor.currentRowIndex, logical row position logicalCY, and cursor position Editor.Cy
 func (e *Editorleaf) drawEditorleaf() bool {
 
-	// 不整合が無いかチェック
-	/* if e.bsArray.Editor() != e {
-		panic("e.bsArray.Editor() != e")
-	} */
-
 	if e.mode == ModeEditor {
 		lineNumberWidth := digitsScreenWidth(e.RowsLength()) + 1
 		// The display width for the number of rows has been changed.
@@ -584,24 +552,13 @@ func (e *Editorleaf) drawEditorleaf() bool {
 	_, Cy := e.meta.Cx, e.meta.Cy // ...
 
 	// Cursor position in logical row
-	if e.bsArray.NeedsCompute(e.meta.RowIndex) /* || e.mode == ModeMinibuffer */ {
+	if e.bsArray.NeedsReparse(e.meta.RowIndex) {
 		_, canceled := e.drawLineWithCompute(0, e.meta.RowIndex, -1, false, foundPositionIndex, foundPositionIndexes)
 		if canceled {
 			return true
 		}
 	} else {
-		// gelog.Debug("not call compute")
-		gecore.Echo.AddText("not call compute")
-
-		// minibuffer の入力では常にここに来てしまう
-		// e.bsArray.Invalidate(e.meta.RowIndex)
-		// e.bsArray.NeedsReparse(e.meta.RowIndex) 判定異常か？ 必ず実行しないと minibuffer でクラッシュする
-		/*
-			_, canceled := e.drawLineWithCompute(0, e.meta.RowIndex, -1, false, foundPositionIndex, foundPositionIndexes)
-			if canceled {
-				return true
-			}
-		*/
+		gelog.Debug("not call compute")
 	}
 	Lcx, Lcy := e.bsArray.CursorPositionOnScreenLogicalRow(e.meta.RowIndex, e.meta.ColIndex)
 	// gecore.Echo.AddText(fmt.Sprintf("(Lcy,Lcx:%d,%d)", Lcy, Lcx))
@@ -616,7 +573,7 @@ func (e *Editorleaf) drawEditorleaf() bool {
 				totalRowAboveCursor = totalLogicalRowIfInHeight + Lcy
 			}
 
-			if e.bsArray.NeedsCompute(rowIndex) {
+			if e.bsArray.NeedsReparse(rowIndex) {
 				_, canceled := e.drawLineWithCompute(0, rowIndex, -1, false, foundPositionIndex, foundPositionIndexes)
 				if canceled {
 					return true
@@ -661,7 +618,7 @@ func (e *Editorleaf) drawEditorleaf() bool {
 	rowIndex := e.meta.RowIndex
 	y := Cy - Lcy
 	// gecore.Echo.AddText(fmt.Sprintf("(rowIndex:%d, y:%d)", rowIndex, y))
-	if e.bsArray.NeedsCompute(rowIndex) {
+	if e.bsArray.NeedsReparse(rowIndex) {
 		_, canceled := e.drawLineWithCompute(y, rowIndex, Lcy, true, -1, foundPositionIndexes)
 		if canceled {
 			return true
@@ -676,7 +633,7 @@ func (e *Editorleaf) drawEditorleaf() bool {
 	// From the cursor position to up
 	rowIndex--
 	for ; rowIndex >= 0 && y >= 0; rowIndex-- {
-		if e.bsArray.NeedsCompute(rowIndex) {
+		if e.bsArray.NeedsReparse(rowIndex) {
 			_, canceled := e.drawLineWithCompute(y, rowIndex, -1, false, -1, foundPositionIndexes)
 			if canceled {
 				return true
@@ -694,7 +651,7 @@ func (e *Editorleaf) drawEditorleaf() bool {
 	y = Cy + (e.bsArray.BoundariesLen(rowIndex) - Lcy)
 	rowIndex++
 	for ; rowIndex < e.RowsLength() && y < Height; rowIndex++ {
-		if e.bsArray.NeedsCompute(rowIndex) {
+		if e.bsArray.NeedsReparse(rowIndex) {
 			_, canceled := e.drawLineWithCompute(y, rowIndex, -1, true, -1, foundPositionIndexes)
 			if canceled {
 				return true
@@ -859,46 +816,6 @@ func (e *Editorleaf) detectHangingIndent(rowIndex int) (int, int, bool) {
 	return indentWidth, 0, false
 }
 
-type vLines struct {
-	r *rows.Row
-
-	// RowLength returns the virtual byte length of a row.
-	//
-	// One byte is added for the virtual line terminator:
-	//   - LF for a non-final row
-	//   - EOF for the final row
-	rowLength int
-
-	// RowsLength returns the number of physical rows.
-	rowsLength int
-
-	isFinalRow bool
-}
-
-// DecodeRune decodes a rune at the specified virtual byte position.
-//
-// At the physical row end, a virtual line terminator is returned:
-//   - LF for a non-final row
-//   - EOF for the final row
-func (vl vLines) DecodeRune(bytePos int) (rune, int, bool) {
-	// The physical row end is represented virtually by
-	// LF or EOF.
-	if bytePos == vl.rowLength-1 {
-		if vl.isFinalRow {
-			return define.EOF, 1, true
-		}
-		return '\n', 1, true
-	}
-
-	return vl.r.DecodeRune(bytePos)
-}
-
-// String returns the contents of the physical row
-// without the virtual line terminator.
-func (vl vLines) String() string {
-	return string(vl.r.Bytes())
-}
-
 // compute boundary of rowIndex
 // draw one row
 //   - n: y position within the Leaf to draw the row
@@ -909,7 +826,6 @@ func (e *Editorleaf) drawLineWithCompute(
 	isDraw bool,
 	foundPositionIndex int, foundIndexes []search.FoundPosition,
 ) (int, bool) {
-
 	// 右端から 折り返し候補を探す探索マージン
 	const rightEdgeWrapMargin = 8 // Search margin from the right edge for wrap candidates.
 	const PageLineCount = 60      // will language に移動する
@@ -921,13 +837,9 @@ func (e *Editorleaf) drawLineWithCompute(
 	var prevCellCh2 rune                                // 表示する文字 (currentCell.Ch, currentCellCh2) の1個前の文字, Controlcode を表示する為に 2個目の rune を用意 "^", "X" // ★
 
 	var breakpoint Boundary
-	lines := vLines{
-		r:          e.editBuffer.Row(rowIndex),
-		rowLength:  e.editBuffer.Row(rowIndex).Length() + 1, // + LF or EOF
-		rowsLength: e.editBuffer.Rows.Length(),
-		isFinalRow: rowIndex == e.editBuffer.Rows.Length()-1,
-	}
-	rowBytes := lines.rowLength
+	lines := e.editBuffer.Rows
+	isEndOfRow := rowIndex == (*lines).Length()-1
+	rowBytes := lines.Row(rowIndex).Length()
 	totalCellWidthForTab := 0 // for compute tab stop
 
 	bo := []Boundary{}
@@ -959,7 +871,7 @@ func (e *Editorleaf) drawLineWithCompute(
 			// if isDraw {
 			gelog.Debug("Cancel drawLineWithCompute")
 			gecore.Echo.AddText("Cancel drawLineWithCompute")
-			e.bsArray.ClearRow(rowIndex)
+			e.bsArray.Clear(rowIndex)
 			return -1, true // canceled
 			//}
 		default:
@@ -971,9 +883,9 @@ func (e *Editorleaf) drawLineWithCompute(
 		isLastCh := bytePosOfRow == rowBytes-1
 		var currentCellCh2 rune // 表示する文字, Controlcode の場合は "^", "X"
 		var ok bool
-		currentCell.Ch, currentCell.Size, ok = lines.DecodeRune(bytePosOfRow)
+		currentCell.Ch, currentCell.Size, ok = lines.Row(rowIndex).DecodeRune(bytePosOfRow)
 		if !ok {
-			panic(fmt.Sprintf("%d '%s'", rowIndex, lines.String()))
+			panic(fmt.Sprintf("%d '%s'", rowIndex, string((*lines)[rowIndex])))
 		}
 		currentCell.Width = utils.RuneWidth(currentCell.Ch)
 		currentCell.Class = e.locale.GetCharClass(currentCell.Ch)
@@ -991,7 +903,7 @@ func (e *Editorleaf) drawLineWithCompute(
 		}, theme.ColorDefault)
 
 		// Special char width
-		if currentCell.Ch == define.EOF && isLastCh && lines.isFinalRow {
+		if currentCell.Ch == define.EOF && isLastCh && isEndOfRow {
 			currentCell.Ch = theme.MarkEOF
 			currentCell.Width = 1 // End of file
 			currentCell.Style = theme.ColorMarkEOF
@@ -1259,12 +1171,6 @@ func (e *Editorleaf) drawLine(
 	startScreenY, rowIndex, cursorLogicalCY int,
 	foundPositionIndex int, foundIndexes []search.FoundPosition,
 ) (int, bool) {
-	/* return e.drawLineWithCompute(
-		startScreenY, rowIndex, cursorLogicalCY,
-		true,
-		foundPositionIndex, foundIndexes,
-	) */
-
 	const PageLineCount = 60 // will language に移動する
 
 	contentWidth := e.editArea.Width - e.lineNumberWidth
@@ -1383,9 +1289,10 @@ func (e *Editorleaf) drawLine(
 	return sy - startScreenY, false
 }
 
-func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, h int, PageLineCount int) {
+func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, h int /* bo []Boundary */, PageLineCount int) {
 	if e.lineNumberWidth > 0 {
 		y := e.editArea.Y + startScreenY
+		// h := len(bo)
 		if startScreenY < 0 {
 			y = e.editArea.Y
 			h += startScreenY
