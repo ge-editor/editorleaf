@@ -1,57 +1,77 @@
-// editorleaf/search/search.go
 package search
 
-import "github.com/ge-editor/gecore/screen"
+import (
+	"github.com/ge-editor/editorleaf/highlight"
+)
 
-type SearchStruct struct {
+// Implements highlight.SpanTemplate
+type SearchResult struct {
+	*highlight.Span
+
+	SearchText string
+	Matches    [][]string
+}
+
+func (s SearchResult) GetSpan() *highlight.Span {
+	return s.Span
+}
+
+// ----------------------
+// SearchResults
+// ----------------------
+
+type SearchResults struct {
+	// Results []SearchResult // highlight に Store する
+	Index int
+
 	CurrentSearchIndex int
-	Indexes            []FoundPosition
-	// Ctx                context.Context
-	// Cancel             context.CancelFunc
 }
 
-func NewSearch() *SearchStruct {
-	return &SearchStruct{
-		CurrentSearchIndex: 0,
-		Indexes:            make([]FoundPosition, 0, 256),
-		// Ctx:                nil,
-		// Cancel:             nil,
+/*
+func (s SearchResults) Highlights() *highlight.Highlights {
+	h := highlight.NewHighlights()
+
+	for _, result := range s.Results {
+		h.Spans = append(h.Spans, result)
 	}
+
+	return h
 }
 
-// Position found in search results
-type FoundPosition struct {
-	Start screen.Cursor
-	Stop  screen.Cursor
-}
+func (s *SearchResults) FromHighlights(h *highlight.Highlights) {
+	results := make([]SearchResult, 0, len(h.Spans))
 
-///////////////////
-// とりあえず移動してきた
-
-func NewFoundPosition(startRowIndex, startColIndex, stopRowIndex, stopColIndex int) FoundPosition {
-	return FoundPosition{
-		Start: screen.Cursor{
-			RowIndex: startRowIndex,
-			ColIndex: startColIndex,
-		},
-		Stop: screen.Cursor{
-			RowIndex: stopRowIndex,
-			ColIndex: stopColIndex,
-		},
+	for _, span := range h.Spans {
+		result, ok := span.(SearchResult)
+		gelog.Debug("NIL?", "span", span, "result", result, "ok", ok)
+		if !ok {
+			continue
+		}
+		results = append(results, result)
 	}
+
+	s.Results = results
+	s.Index = h.Index
 }
+*/
+
+// Indexes -> Results
 
 // Returns the first index of the found search position that matches the row index.
 // Return -1, not found match position.
-func (ss *SearchStruct) GetFoundPosition(rowIndex int) int {
-	for i := 0; i < len(ss.Indexes); i++ {
-		if ss.Indexes[i].Start.RowIndex >= rowIndex {
+/*
+func (s *SearchResults) GetFoundPosition(rowIndex int) int {
+	for i := 0; i < len(s.Results); i++ {
+		if s.Results[i].Start.RowIndex >= rowIndex {
 			return i
 		}
 	}
 	return -1
 }
+*/
 
-func (ss *SearchStruct) GetFindIndexes() []FoundPosition {
-	return ss.Indexes
+/*
+func (s *SearchResults) GetFindIndexes() []SearchResult {
+	return s.Results
 }
+*/

@@ -17,7 +17,6 @@ import (
 	"github.com/ge-editor/editorleaf/buffer"
 	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/gecore"
-	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/keychord"
 )
@@ -44,14 +43,24 @@ func (qg *quitGuard) Priority() int {
 	return 50
 }
 
-func (qg *quitGuard) Name() string             { return "quitGuard" }
-func (qg *quitGuard) Keys() *keychord.RootNode { return qg.RootNode }
+func (qg *quitGuard) Name() string {
+	return "quitGuard"
+}
+
+func (qg *quitGuard) Keys() *keychord.RootNode {
+	return qg.RootNode
+}
+
 func (qg *quitGuard) WillEnter() {
 	qg.ConfirmFunc()
 }
-func (qg *quitGuard) WillExit() {}
+
+func (qg *quitGuard) WillExit() {
+}
+
 func (qg *quitGuard) Draw() bool {
-	qg.MinibufferManager.Draw(screen.Get().Screen)
+	// これは不要、呼び出すと echo line が消える
+	// qg.MinibufferManager.Draw(screen.Get().Screen)
 	return false
 }
 
@@ -91,7 +100,7 @@ func (qg *quitGuard) askNext() {
 		// Use the popped first meta if not found in the tree.
 		meta = buffSet.PopMeta()
 	}
-	saveState(buffSet.GetPath(), meta.Cursor)
+	saveState(buffSet.GetPath(), meta.RowsPos)
 
 	if !buffSet.IsDirtyFlag() {
 		qg.currentIndex++

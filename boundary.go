@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/ge-editor/editorleaf/search"
+	//"github.com/ge-editor/editorleaf/search"
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gelog"
 	"github.com/ge-editor/locale"
@@ -55,7 +55,7 @@ func (b *Boundary) IsEmpty() bool {
 		b.LogicalRowWidth == 0
 }
 
-// ------------------------------------------------------------------
+// --------------------
 
 // RowLayout represents layout information for a single physical row.
 //
@@ -72,7 +72,7 @@ type RowLayout struct {
 	RuneWidthCache []locale.Cell
 }
 
-// ------------------------------------------------------------------
+// --------------------
 
 // BoundariesArray manages layout cache information per physical row.
 //
@@ -127,7 +127,7 @@ func (b *BoundariesArray) BoundariesLen(rowIndex int) int {
 	// 範囲外アクセス
 	if rowIndex >= len(b.rows) {
 		// 呼び出し元情報 + 指定インデックス + 実際の配列長を一緒に出力
-		err := fmt.Errorf("[INVALID INDEX] Called from %s | Target: [rowIndex:%d, colIndex:%d] | Actual limits: [rowsLen:%d, cacheLen:%d]", gelog.CallerInfo(), rowIndex, len(b.rows))
+		err := fmt.Errorf("[INVALID INDEX] Called from %s | rowIndex:%d, rowsLen:%d", gelog.CallerInfo(), rowIndex, len(b.rows))
 		gelog.Error(err.Error())
 		gecore.Echo.AddText(err.Error())
 		panic(err)
@@ -217,7 +217,7 @@ func (b *BoundariesArray) ClearRow(rowIndex int) {
 	b.rows[rowIndex] = RowLayout{}
 }
 
-// ------------------------------------------------------------------
+// --------------------
 // Lazy evaluation support
 
 // NeedsCompute reports whether layout information for rowIndex
@@ -274,7 +274,8 @@ func (b *BoundariesArray) NeedsCompute(rowIndex int) bool {
 func (b *BoundariesArray) beAvailable(rowIndex int) {
 	if b.NeedsCompute(rowIndex) {
 		b.editor.drawLineWithCompute(
-			0, rowIndex, -1, false, -1, []search.FoundPosition{},
+			0, rowIndex, -1, false,
+			// -1, []search.FoundPosition{},
 		)
 	}
 }
@@ -323,6 +324,18 @@ func (b *BoundariesArray) OnEndOfLogicalRow(rowIndex, colIndex int) bool {
 
 func (b *BoundariesArray) IsEndOfLogicalRow(rowIndex, colIndex int) bool {
 	b.beAvailable(rowIndex)
+
+	logicalRowIndex := b.GetIndexOfLogicalRow(rowIndex, colIndex)
+
+	/*
+		lastLogicalRowIndex := b.GetIndexOfLastLogicalRow(rowIndex)
+		if logicalRowIndex == lastLogicalRowIndex {
+			return false
+		}
+	*/
+
+	bo := b.Boundary(rowIndex, logicalRowIndex)
 	cell := b.rows[rowIndex].RuneWidthCache[colIndex]
-	return b.rows[rowIndex].Boundaries[cell.LogicalRowIndex].StopLogicalRowByteIndex == colIndex
+
+	return colIndex+cell.Size == bo.StopLogicalRowByteIndex
 }

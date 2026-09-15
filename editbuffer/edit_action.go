@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/ge-editor/editorleaf/editbuffer/rows"
-	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/gelog"
 )
 
@@ -67,8 +66,8 @@ const (
 
 type EditAction struct {
 	Class  ActionClass
-	Before screen.Cursor
-	After  screen.Cursor
+	Before rows.RowsPos
+	After  rows.RowsPos
 	Data   rows.Rows
 }
 

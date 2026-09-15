@@ -192,36 +192,6 @@ func (eb *EditBuffer) Load() error {
 	return nil
 }
 
-/*
-	// CR に対応していない
-	 func readLine(r *bufio.Reader) ([]byte, NewlineType, error) {
-		line, err := r.ReadBytes('\n')
-
-		if err != nil && err != io.EOF {
-			return nil, 0, err
-		}
-
-		var newlineType NewlineType
-
-		if len(line) > 0 {
-			if bytes.HasSuffix(line, NewlineTypeCRLF.Bytes()) {
-				newlineType = NewlineTypeCRLF
-				line = line[:len(line)-2]
-			} else if bytes.HasSuffix(line, NewlineTypeLF.Bytes()) {
-				newlineType = NewlineTypeLF
-				line = line[:len(line)-1]
-			} else if bytes.HasSuffix(line, NewlineTypeCR.Bytes()) {
-				newlineType = NewlineTypeCR
-				line = line[:len(line)-1]
-			} else {
-				newlineType = NewlineTypeNone
-			}
-		}
-
-		return line, newlineType, err
-	}
-*/
-
 // 1byte ずつ処理、効率が悪い
 func ReadLine(r *bufio.Reader) ([]byte, NewlineType, error) {
 	var line []byte

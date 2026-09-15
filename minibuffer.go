@@ -5,14 +5,14 @@ package editorleaf
 import (
 	"github.com/ge-editor/editorleaf/buffer"
 	"github.com/ge-editor/editorleaf/editbuffer"
+	"github.com/ge-editor/editorleaf/highlight"
 	"github.com/ge-editor/gecore/screen"
-	"github.com/ge-editor/gecore/styleresolver"
-	"github.com/ge-editor/gelog"
 	"github.com/ge-editor/locale"
 )
 
 func newMinibuffer() *Editorleaf {
-	gelog.Debug("newMinibuffer")
+	// gelog.Debug("newMinibuffer")
+
 	eb := editbuffer.NewFile("*minibuffer*")
 	eb.New()
 	e := &Editorleaf{
@@ -22,14 +22,15 @@ func newMinibuffer() *Editorleaf {
 		mode:       ModeEditor,
 		locale:     locale.New(),
 
-		styleResolver: styleresolver.New(),
+		// styleResolver: styleresolver.New(),
 		// searchResolver:      &search.SearchResolver{},
-		specialCharResolver: &styleresolver.SpecialCharResolver{},
+		// specialCharResolver: &styleresolver.SpecialCharResolver{},
+		highlightLayer: &highlight.HighlightsLayer{},
 	}
 	e.bsArray = NewBoundariesArray(e)
 
 	// e.styleResolver.Add(&search.SearchResolver{})
-	e.styleResolver.Add(&styleresolver.SpecialCharResolver{})
+	// e.styleResolver.Add(&styleresolver.SpecialCharResolver{})
 
 	return e
 }
