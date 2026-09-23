@@ -7,16 +7,35 @@ import (
 
 func NewMark(ff *editbuffer.EditBuffer, current rows.RowsPos, content string) *Mark {
 	return &Mark{
-		File:    ff,
-		RowsPos: current,
-		Content: content,
+		EditBuffer: ff,
+		RowsPos:    current,
+		Label:      content,
 	}
 }
 
 type Mark struct {
-	File *editbuffer.EditBuffer
+	EditBuffer *editbuffer.EditBuffer
 	rows.RowsPos
-	Content string
+	Label string
+}
+
+// func (m *Mark) Leaf() tree.Leaf {}
+// func (m *Mark) LeafName() string {}
+
+func (m *Mark) SetLabel(label string) {
+	m.Label = label
+}
+
+func (m *Mark) GetLabel() string {
+	return m.Label
+}
+
+func (m *Mark) Equals(a *Mark) bool {
+	if m.EditBuffer != a.EditBuffer ||
+		!m.RowsPos.Equals(a.RowsPos) {
+		return false
+	}
+	return true
 }
 
 // AdjustForInsertion updates the mark position after text insertion.

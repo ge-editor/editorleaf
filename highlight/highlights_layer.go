@@ -17,14 +17,12 @@ func (h *HighlightsLayer) GetSpanTemplate(priority, index int) *SpanTemplate {
 }
 
 func (h *HighlightsLayer) Highlights(priorityIndex int) *Highlights {
+	for len(*h) <= priorityIndex {
+		*h = append(*h, &Highlights{})
+	}
+
 	return (*h)[priorityIndex]
 }
-
-/*
-func (h *HighlightsLayer) GetSpan(priority, index int) *Span {
-	return (*h.GetSpanTemplate(priority, index)).GetSpan()
-}
-*/
 
 func (h *HighlightsLayer) MaxPriority() int {
 	return len(*h) - 1
@@ -38,7 +36,7 @@ func (h *HighlightsLayer) SpanLength(priority int) int {
 	return len((*h)[priority].Spans)
 }
 
-func (h *HighlightsLayer) AppendSpan(
+/* func (h *HighlightsLayer) AppendSpan(
 	priority int,
 	span *SpanTemplate,
 ) {
@@ -48,6 +46,7 @@ func (h *HighlightsLayer) AppendSpan(
 
 	(*h)[priority].Spans = append((*h)[priority].Spans, span)
 }
+*/
 
 func (h *HighlightsLayer) SetSpan(
 	priority int,
@@ -65,11 +64,13 @@ func (h *HighlightsLayer) SetSpan(
 	(*h)[priority].Spans[index] = span
 }
 
+/*
 func (h *HighlightsLayer) Clear(
 	priority int,
 ) {
 	(*h)[priority].Spans = (*h)[priority].Spans[:0]
 }
+*/
 
 /*
 func (h *HighlightsLayer) Set(

@@ -16,8 +16,11 @@ import (
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/define"
 	"github.com/ge-editor/gecore/killbuffer"
+	"github.com/ge-editor/gecore/marks"
 	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/gelog"
+	"github.com/ge-editor/locale"
+	"github.com/ge-editor/theme"
 	"github.com/ge-editor/utils"
 )
 
@@ -142,7 +145,6 @@ func (e *Editorleaf) MoveCursorForward() {
 		if !ok {
 			gelog.Error("error")
 		}
-		// if e.bsArray.OnEndOfLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex) {
 		if e.bsArray.IsEndOfLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex) {
 			y++
 			x = 0
@@ -193,6 +195,159 @@ func (e *Editorleaf) MoveCursorBackward() {
 			x = e.bsArray.Boundary(e.meta.RowsPos.RowIndex, after).LogicalRowWidth - w
 		} else {
 			x -= w
+		}
+	}
+
+	e.meta.PrevScreenPos.Col = x
+	e.moveCursor(x, y)
+}
+
+// Move cursor to next word.
+func (e *Editorleaf) MoveCursorNextWord() {
+	x, y := e.meta.ScreenPos.Col, e.meta.ScreenPos.Row
+
+	lines := e.editBuffer.Rows
+	line := lines.Row(e.meta.RowsPos.RowIndex)
+	if line.IsColIndexAtRowEnd(e.meta.RowsPos.ColIndex) {
+		if lines.IsRowIndexLastRow(e.meta.RowsPos.RowIndex) {
+			gecore.Echo.AddText("End of buffer")
+			return
+		}
+		y++
+		e.meta.RowsPos.RowIndex++
+		x = 0
+		e.meta.RowsPos.ColIndex = 0
+	} else {
+
+		var prevCc, cc locale.CharClass
+		notUppercaseBit := ^locale.UPPERCASE
+		for {
+			ch, size, ok := (*lines).Row(e.meta.RowsPos.RowIndex).DecodeRune(e.meta.RowsPos.ColIndex)
+			if !ok {
+				gelog.Error("MoveCursorNextWord: error", "RowsPos", e.meta.RowsPos)
+				return
+			}
+
+			w := e.locale.RuneWidth(ch)
+			prevCc = cc
+			cc = e.locale.GetCharClass(ch)
+			if prevCc != 0 {
+				if prevCc&locale.UPPERCASE == 0 && cc&locale.UPPERCASE > 0 {
+					break
+				}
+				prevCc &= notUppercaseBit
+				cc &= notUppercaseBit
+				if prevCc != cc && cc&locale.TAB == 0 && cc&locale.SPACE == 0 && cc&locale.SYMBOL == 0 {
+					break
+				}
+			}
+			if e.bsArray.IsEndOfLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex) {
+				y++
+				x = 0
+			} else {
+				x += w
+			}
+			e.meta.RowsPos.ColIndex += size
+		}
+	}
+
+	e.meta.PrevScreenPos.Col = x
+	e.moveCursor(x, y)
+}
+
+// Move cursor to previous word.
+func (e *Editorleaf) MoveCursorPreviousWord() {
+	x, y := e.meta.ScreenPos.Col, e.meta.ScreenPos.Row
+
+	if e.meta.RowsPos.ColIndex == 0 {
+		if e.meta.RowsPos.RowIndex == 0 {
+			gecore.Echo.AddText("Beginning of buffer")
+			return
+		}
+
+		y--
+		e.meta.RowsPos.RowIndex--
+
+		lastBs := e.bsArray.LastBoundary(e.meta.RowsPos.RowIndex)
+		ch, _, colIndex, _ := e.editBuffer.Rows.Row(e.meta.RowsPos.RowIndex).DecodeEndRune()
+		w := e.locale.RuneWidth(ch)
+
+		// Move to the last character of the previous logical row.
+		x = lastBs.LogicalRowWidth - w
+		e.meta.RowsPos.ColIndex = colIndex
+	} else {
+		var prevCc, cc locale.CharClass
+		notUppercaseBit := ^locale.UPPERCASE
+
+		for {
+			before := e.bsArray.GetIndexOfLogicalRow(
+				e.meta.RowsPos.RowIndex,
+				e.meta.RowsPos.ColIndex,
+			)
+
+			ch, _, colIndex, ok := e.editBuffer.Rows.Row(
+				e.meta.RowsPos.RowIndex,
+			).DecodePrevRune(e.meta.RowsPos.ColIndex)
+			if !ok {
+				break
+			}
+
+			w := e.locale.RuneWidth(ch)
+
+			// cc is the character we just moved onto.
+			// prevCc is the character which was to its right.
+			prevCc = cc
+			cc = e.locale.GetCharClass(ch)
+
+			if prevCc != 0 {
+				// The forward direction stops at:
+				//
+				//     lowercase -> UPPERCASE
+				//
+				// Therefore, when moving backwards, stop at the
+				// corresponding boundary:
+				//
+				//     UPPERCASE <- lowercase
+				//
+				if prevCc&locale.UPPERCASE > 0 &&
+					cc&locale.UPPERCASE == 0 {
+					break
+				}
+
+				savePrevCC, saveCC := prevCc, cc
+
+				prevCc &= notUppercaseBit
+				cc &= notUppercaseBit
+
+				// Same class transition rule as MoveCursorNextWord,
+				// evaluated in the reverse direction.
+				if prevCc != cc &&
+					prevCc&locale.TAB == 0 &&
+					prevCc&locale.SPACE == 0 &&
+					prevCc&locale.SYMBOL == 0 {
+					break
+				}
+
+				prevCc, cc = savePrevCC, saveCC
+			}
+
+			e.meta.RowsPos.ColIndex = colIndex
+
+			after := e.bsArray.GetIndexOfLogicalRow(
+				e.meta.RowsPos.RowIndex,
+				e.meta.RowsPos.ColIndex,
+			)
+
+			if after < before {
+				// Crossed a logical-row boundary.
+				y--
+				x = e.bsArray.Boundary(
+					e.meta.RowsPos.RowIndex,
+					after,
+				).LogicalRowWidth
+			} else {
+				x -= w
+			}
 		}
 	}
 
@@ -715,39 +870,55 @@ func (e *Editorleaf) YankFromClipboard() {
 }
 
 func (e *Editorleaf) Yank() {
-	r := killbuffer.KillBuffer.GetLast()
-	if r == nil {
+	b := killbuffer.KillBuffer.GetLast()
+	if b == nil {
 		return
 	}
 	// e.insertBytes(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex, r)
-	e.insertBytesArray(r, true)
+	e.insertBytesArray(b, true)
 }
 
 // --------------------
 // Mark
 // --------------------
 
-func (e *Editorleaf) SetCurrentMark(m *mark.Mark) {
-	e.meta.Mark = m
+func (e *Editorleaf) MoveToMarkPosition(m *mark.Mark) {
+	e.meta.RowsPos = m.RowsPos
 }
 
 func (e *Editorleaf) SetMarkAtCursor() {
-	content := e.getContentWidthoutSpecialCharactor(e.meta.RowsPos, 20)
-	newMark := mark.NewMark(e.editBuffer, e.meta.RowsPos, content)
+	label := e.getContentWidthoutSpecialCharactor(e.meta.RowsPos, 20)
+	newMark := mark.NewMark(e.editBuffer, e.meta.RowsPos, label)
 
-	if Marks.UnsetMarkByValue(newMark) {
+	for _, a := range marks.Marks.Items() {
+		m, ok := a.(*mark.Mark)
+		if !ok || !m.Equals(newMark) {
+			continue
+		}
+
 		gecore.Echo.AddText("Unset mark")
+		marks.Marks.Remove(m)
 		return
 	}
 
-	Marks.AddMark(newMark)
 	gecore.Echo.AddText("Set mark")
+	marks.Marks.Add(newMark)
+}
+
+func (e *Editorleaf) findLastByEditBuffer() *mark.Mark {
+	for _, a := range marks.Marks.Items() {
+		lastMark, ok := a.(*mark.Mark)
+		if ok && lastMark.EditBuffer == e.editBuffer {
+			return lastMark
+		}
+	}
+	return nil
 }
 
 var tmpMarkPos *mark.Mark
 
 func (e *Editorleaf) SwapCursorAndMark() {
-	lastMark := Marks.FindLastByFile(e.editBuffer)
+	lastMark := e.findLastByEditBuffer()
 	if lastMark == nil {
 		gecore.Echo.AddText("No mark set")
 		return
@@ -768,7 +939,25 @@ func (e *Editorleaf) SwapCursorAndMark() {
 }
 
 func (e *Editorleaf) FilterByCharacters(chars string) []*mark.Mark {
-	return Marks.FilterByCharacters(chars)
+	items := []*mark.Mark{}
+
+	for _, a := range marks.Marks.Items() {
+		mk, ok := a.(*mark.Mark)
+		if !ok {
+			continue
+		}
+
+		text := fmt.Sprintf("%s %s", mk.EditBuffer.GetBase(), utils.RemoveSymbols(mk.Label))
+		if chars != "" {
+			if utils.ContainsAllCharacters(text, chars) {
+				items = append(items, mk)
+			}
+		} else {
+			items = append(items, mk)
+		}
+	}
+
+	return items
 }
 
 // --------------------
@@ -788,7 +977,7 @@ func (e *Editorleaf) copyRegion(a, b rows.RowsPos) error {
 
 // Copy cursor region to Kill Buffer and Clipboard
 func (e *Editorleaf) CopyRegion() {
-	mark := Marks.FindLastByFile(e.editBuffer)
+	mark := e.findLastByEditBuffer()
 	if mark == nil {
 		gecore.Echo.AddText("The mark is not set now, so there is no region")
 		return
@@ -853,7 +1042,7 @@ func (e *Editorleaf) killRegion(start, stop rows.RowsPos) {
 // Kill region between last mark to cursor
 // and push undo and kill buffers
 func (e *Editorleaf) KillRegion() {
-	mark := Marks.FindLastByFile(e.editBuffer)
+	mark := e.findLastByEditBuffer()
 	if mark == nil {
 		gecore.Echo.AddText("The mark is not set now, so there is no region")
 		return
@@ -1286,4 +1475,48 @@ func (e *Editorleaf) getColumnIndexClosestToCursorXPosition(rowIndex, indexOfLog
 		// Advance colIndex by the size of the decoded rune.
 		colIndex += size
 	}
+}
+
+// Return content widthout special charactor
+func (e *Editorleaf) getContentWidthoutSpecialCharactor(current rows.RowsPos, maxContentWidth int) (content string) {
+	isSpecialChar := func(ch rune) bool {
+		return ch < 32 || ch == define.DEL || ch == '　' || ch == define.NO_BREAK_SPACE
+	}
+
+	width := 0
+	skip := false
+	startCol := current.ColIndex
+	for y := current.RowIndex; y < e.editBuffer.Rows.Length(); y++ {
+		row := e.editBuffer.Rows.Row(y)
+		for x := startCol; x < len(*row); {
+			ch, size := utf8.DecodeRune((*row)[x:])
+			w := e.locale.RuneWidth(ch)
+			x += size // Don't use x below
+			s := string(ch)
+			if isSpecialChar(ch) {
+				if skip {
+					continue
+				}
+				skip = true
+				switch ch {
+				case '\n':
+					s = string(theme.MarkNewline)
+				case '\t':
+					s = string(' ')
+				default:
+					s = string(theme.MarkContinue)
+				}
+				w = 1
+			} else {
+				skip = false
+			}
+			if width+w > maxContentWidth {
+				return content
+			}
+			content += s
+			width += w
+		}
+		startCol = 0
+	}
+	return content
 }

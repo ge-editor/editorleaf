@@ -89,19 +89,20 @@ func (l *LeafType) CancelManager() *gecore.EventCancelManager {
 
 // MinibufferLeaf は tree に属さない
 // Editor が生成されたタイミングで keymap をバインドしない
+/*
 func NewMinibufferLeaf() *Editorleaf {
 	editor := newEditorLeaf()
 	// ed.parentView = nil // tree に属さない leaf
 	editor.screen = screen.Get()
 
 	// keymap をバインドしない
-	/*
-		km := keychord.NewRootNode()
-		if v.bindKeymap != nil {
-			v.bindKeymap(km, editor)
-		}
-		editor.SetKeyDispatcher(km)
-	*/
+
+	// km := keychord.NewRootNode()
+	// if v.bindKeymap != nil {
+	// 	v.bindKeymap(km, editor)
+	// }
+	// editor.SetKeyDispatcher(km)
 
 	return editor
 }
+*/

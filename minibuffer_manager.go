@@ -26,7 +26,7 @@ type MinibufferManagerStruct struct {
 	session    *Session
 	onComplete func(result keychord.KeyDispatchTransition)
 
-	overlayRect utils.Rect
+	overlayRect screen.Rect
 }
 
 func (m *MinibufferManagerStruct) Start(session *Session, onComplete func(result keychord.KeyDispatchTransition)) {
@@ -121,7 +121,7 @@ func (m *MinibufferManagerStruct) RequiredHeight() int {
 	return m.MinibufferResize(m.overlayRect)
 }
 
-func (m *MinibufferManagerStruct) Resize(overlayRect utils.Rect) {
+func (m *MinibufferManagerStruct) Resize(overlayRect screen.Rect) {
 	m.overlayRect = overlayRect
 
 	if !m.active {
@@ -133,7 +133,7 @@ func (m *MinibufferManagerStruct) Resize(overlayRect utils.Rect) {
 
 // return Remaining height
 // overlayRect.Height: この値のみ画面の高さ
-func (m *MinibufferManagerStruct) MinibufferResize(overlayRect utils.Rect) int {
+func (m *MinibufferManagerStruct) MinibufferResize(overlayRect screen.Rect) int {
 	// gelog.Info("overlayRect", "height", overlayRect.Height)
 
 	maxHeight := int(float32(overlayRect.Height) * 0.2)
@@ -155,7 +155,7 @@ func (m *MinibufferManagerStruct) MinibufferResize(overlayRect utils.Rect) int {
 	return height
 }
 
-func (m *MinibufferManagerStruct) Draw(s tcell.Screen) bool {
+func (m *MinibufferManagerStruct) Draw() bool {
 	if !m.active {
 		return false
 	}

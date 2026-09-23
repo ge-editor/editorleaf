@@ -12,27 +12,8 @@ import (
 	"github.com/ge-editor/editorleaf/highlight"
 	"github.com/ge-editor/editorleaf/search"
 	"github.com/ge-editor/gecore"
-	"github.com/ge-editor/gelog"
 	"github.com/ge-editor/theme"
 )
-
-// --------------------
-// Search and replace
-// --------------------
-
-/*
-func (e *Editorleaf) MetaSearch() *SearchResults {
-	// var s *SearchResults
-	s := &SearchResults{}
-	h := e.meta.HighlightLayer.Get(highlight.LayerSearch)
-	if h == nil {
-		e.meta.HighlightLayer.Set(highlight.LayerSearch, s.Highlights())
-	} else {
-		s.FromHighlights(h)
-	}
-	return s
-}
-*/
 
 func (e *Editorleaf) MoveNextFoundWord() {
 	searchResults := e.meta.Search
@@ -81,8 +62,8 @@ func (e *Editorleaf) MoveNextFoundWord() {
 	if !ok {
 		return
 	}
-	e.meta.RowsPos.RowIndex = f.Start.RowIndex
-	e.meta.RowsPos.ColIndex = f.Start.ColIndex
+
+	e.meta.RowsPos = f.Start
 }
 
 func (e *Editorleaf) MovePrevFoundWord() {
@@ -107,8 +88,10 @@ func (e *Editorleaf) MovePrevFoundWord() {
 				break
 			}
 		}
-	} else if searchResults.CurrentSearchIndex == 0 {
+		/* don't loop
+		} else if searchResults.CurrentSearchIndex == 0 {
 		searchResults.CurrentSearchIndex = l - 1
+		*/
 	} else {
 		searchResults.CurrentSearchIndex--
 	}
@@ -124,17 +107,19 @@ func (e *Editorleaf) MovePrevFoundWord() {
 	if !ok {
 		return
 	}
-	//e.meta.RowsPos.RowIndex = foundIndexes[search.CurrentSearchIndex].Start.RowIndex
-	//e.meta.RowsPos.ColIndex = foundIndexes[search.CurrentSearchIndex].Start.ColIndex
-	e.meta.RowsPos.RowIndex = f.Start.RowIndex
-	e.meta.RowsPos.ColIndex = f.Start.ColIndex
+
+	e.meta.RowsPos = f.Start
+}
+
+func (e *Editorleaf) SearchHistory() []string {
+	return e.meta.Search.History.Items
 }
 
 // When not using regular expressions
-func (e *Editorleaf) SearchText(text string, caseSensitive, isRegexp bool, ctx context.Context) {
-	searchResults := e.meta.Search
-	gelog.Debug("SearchText", "search", searchResults)
+func (e *Editorleaf) SearchText(text string, caseSensitive, isRegexp bool) {
+	// gelog.Debug("SearchText", "search", searchResults)
 
+	searchResults := e.meta.Search
 	searchResults.CurrentSearchIndex = -1
 
 	textLen := len(text)
@@ -143,96 +128,121 @@ func (e *Editorleaf) SearchText(text string, caseSensitive, isRegexp bool, ctx c
 	}
 
 	if isRegexp {
-		e.SearchRegexp(text, caseSensitive, ctx)
+		e.SearchRegexp(text, caseSensitive)
 	} else {
-		e.searchText(text, caseSensitive, ctx)
+		e.searchText(text, caseSensitive)
 	}
 }
 
-func (e *Editorleaf) SearchRegexp(searchTerm string, caseSensitive bool, ctx context.Context) {
-	// search := e.MetaSearch()
-	// search := SearchResults{}
-	h := e.meta.HighlightLayer
+func (e *Editorleaf) SearchRegexp(searchTerm string, caseSensitive bool) {
+	e.meta.Search.SearchMu.Lock()
+	defer e.meta.Search.SearchMu.Unlock()
 
-	rows := e.editBuffer.Rows
-	re, err := regexp.Compile(searchTerm)
-	if err != nil {
-		return
+	// 進行中の検索があればキャンセル
+	if e.meta.Search.SearchCancel != nil {
+		e.meta.Search.SearchCancel()
 	}
 
-	for rowIndex := 0; rowIndex < rows.Length(); rowIndex++ {
-		matches := re.FindAllSubmatchIndex((*rows)[rowIndex], -1)
-		if matches == nil {
-			continue
+	// 新しい検索用の Context と CancelFunc を作成
+	ctx, cancel := context.WithCancel(context.Background())
+	e.meta.Search.SearchCancel = cancel
+
+	go func(ctx context.Context) {
+		e.meta.Search.History.Add(searchTerm)
+
+		hls := e.meta.HighlightLayer.Highlights(highlight.LayerSearch)
+		hls.Clear()
+
+		rows := e.editBuffer.Rows
+		re, err := regexp.Compile(searchTerm)
+		if err != nil {
+			return
 		}
-		for _, match := range matches {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				// search.Results = append(search.Results, NewFoundPosition(rowIndex, match[0], rowIndex, match[1]))
-				a := NewFoundPosition(rowIndex, match[0], rowIndex, match[1], theme.ColorSearchFound)
-				b := (highlight.SpanTemplate)(a)
-				// h.SetSpan(highlight.LayerSearch, searchIndex, &b)
-				h.AppendSpan(highlight.LayerSearch, &b)
-				// searchIndex++
+
+		for rowIndex := 0; rowIndex < rows.Length(); rowIndex++ {
+			matches := re.FindAllSubmatchIndex((*rows)[rowIndex], -1)
+			if matches == nil {
+				continue
+			}
+			for _, match := range matches {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					a := NewFoundPosition(rowIndex, match[0], rowIndex, match[1], theme.ColorSearchFound)
+					b := (highlight.SpanTemplate)(a)
+					hls.AppendSpan(&b)
+					// searchIndex++
+				}
 			}
 		}
-	}
+	}(ctx)
 }
 
-func (e *Editorleaf) searchText(text string, caseSensitive bool, ctx context.Context) {
-	// gelog.Debug("searchText")
+func (e *Editorleaf) searchText(text string, caseSensitive bool) {
+	e.meta.Search.SearchMu.Lock()
+	defer e.meta.Search.SearchMu.Unlock()
 
-	h := e.meta.HighlightLayer
-
-	if !caseSensitive {
-		text = strings.ToLower(text)
+	// 進行中の検索があればキャンセル
+	if e.meta.Search.SearchCancel != nil {
+		e.meta.Search.SearchCancel()
 	}
-	textBytes := []byte(text)
-	textBytesLen := len(textBytes)
 
-	lines := e.editBuffer.Rows
-	for i := 0; i < lines.Length(); i++ {
-		line := (*lines)[i]
-		index := 0
-	loop:
-		for limit := 0; ; limit++ {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				substring := line[index:]
-				if !caseSensitive {
-					substring = bytes.ToLower(substring)
-				}
-				findIndex := bytes.Index(substring, textBytes)
-				// gelog.Debug("searchText", "findIndex", findIndex, "substring", substring, "textBytes", textBytes)
-				if findIndex == -1 {
-					break loop
-				}
-				startIndex := len(line[:index+findIndex])
-				stopIndex := startIndex + textBytesLen
-				// search.Results = append(search.Results, NewFoundPosition(i, startIndex, i, stopIndex))
-				a := NewFoundPosition(i, startIndex, i, stopIndex, theme.ColorSearchFound)
-				b := (highlight.SpanTemplate)(a)
-				// h.SetSpan(highlight.LayerSearch, i, &b)
-				h.AppendSpan(highlight.LayerSearch, &b)
-				index += findIndex + textBytesLen
-			}
+	// 新しい検索用の Context と CancelFunc を作成
+	ctx, cancel := context.WithCancel(context.Background())
+	e.meta.Search.SearchCancel = cancel
 
-			if limit > 100_000 {
-				gecore.Echo.AddText("Search text over 100,000")
-				return
+	go func(ctx context.Context) {
+		e.meta.Search.History.Add(text)
+
+		hls := e.meta.HighlightLayer.Highlights(highlight.LayerSearch)
+		hls.Clear()
+
+		if !caseSensitive {
+			text = strings.ToLower(text)
+		}
+		textBytes := []byte(text)
+		textBytesLen := len(textBytes)
+
+		lines := e.editBuffer.Rows
+		for i := 0; i < lines.Length(); i++ {
+			line := (*lines)[i]
+			index := 0
+		loop:
+			for limit := 0; ; limit++ {
+				select {
+				case <-ctx.Done():
+					return
+				default:
+					substring := line[index:]
+					if !caseSensitive {
+						substring = bytes.ToLower(substring)
+					}
+					findIndex := bytes.Index(substring, textBytes)
+					// gelog.Debug("searchText", "findIndex", findIndex, "substring", substring, "textBytes", textBytes)
+					if findIndex == -1 {
+						break loop
+					}
+					startIndex := len(line[:index+findIndex])
+					stopIndex := startIndex + textBytesLen
+					a := NewFoundPosition(i, startIndex, i, stopIndex, theme.ColorSearchFound)
+					b := (highlight.SpanTemplate)(a)
+					hls.AppendSpan(&b)
+					index += findIndex + textBytesLen
+				}
+
+				if limit > 100_000 {
+					gecore.Echo.AddText("Search text over 100,000")
+					return
+				}
 			}
 		}
-	}
+	}(ctx)
 }
 
 func (e *Editorleaf) ReplaceCurrentSearchString(str string) {
-	// search := e.MetaSearch()
-	// searchResults := search.SearchResults{}
 	searchResults := e.meta.Search
+
 	h := e.meta.HighlightLayer
 	le := h.SpanLength(highlight.LayerSearch)
 	if le == 0 {
@@ -299,6 +309,10 @@ func NewFoundPosition(startRowIndex, startColIndex, stopRowIndex, stopColIndex i
 	}
 }
 
+// -----------------------------------------------
+// HighlightsLayer の情報から描画色を決定する
+// -----------------------------------------------
+
 // highlightPosStatus [editor/meta][priority]spansIndex
 type highlightPosStatus [][]int
 
@@ -335,7 +349,7 @@ func (s *highlightPosStatus) Clear() {
 	*s = nil
 }
 
-// HighlightsLayer の情報から色を決定する
+// HighlightsLayer の情報から描画色を決定する
 // highlightPosStatus 以降で pos と Traverse な関係にある highlights.Span を返す。
 func (e Editorleaf) FindHighlightSpan(
 	pos rows.RowsPos,

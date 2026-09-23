@@ -15,6 +15,7 @@ import (
 	"github.com/ge-editor/editorleaf/mark"
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/define"
+	"github.com/ge-editor/gecore/marks"
 	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/gelog"
@@ -32,7 +33,7 @@ var (
 	// Initialization has been moved to the newEditor function
 	// BufferSets, _ = buffer.NewBufferSets(gecore.Files)
 	BufferSets *buffer.BufferSets
-	Marks      = mark.NewMarks()
+	// Marks      = mark.NewMarks()
 )
 
 func newEditorLeaf() *Editorleaf {
@@ -71,8 +72,8 @@ type Editorleaf struct {
 	screen         *screen.Screen
 	active         bool
 
-	viewArea utils.Rect // include mode line
-	editArea utils.Rect
+	viewArea screen.Rect // include mode line
+	editArea screen.Rect
 
 	verticalThreshold int // Changes depending on screen size
 
@@ -142,7 +143,7 @@ func (e *Editorleaf) LeafType() tree.LeafType {
 	return e.parentLeafType
 }
 
-func (e *Editorleaf) Resize(viewArea utils.Rect) {
+func (e *Editorleaf) Resize(viewArea screen.Rect) {
 	e.viewArea = viewArea
 	e.editArea = viewArea
 	if e.mode != ModeEditor {
@@ -268,7 +269,7 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end rows.R
 			// Adjust cursor based on the type of edit.
 			switch sync {
 			case INSERT:
-				meta.Mark.AdjustForInsertion(start, end)
+				// meta.Mark.AdjustForInsertion(start, end)
 
 				// Skip if this buffer set is not linked to the file being edited.
 				if buffSet.EditBuffer != e.editBuffer {
@@ -276,7 +277,7 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end rows.R
 				}
 				meta.RowsPos.AdjustForInsertion(start, end)
 			case DELETE:
-				meta.Mark.AdjustForDeletion(start, end)
+				// meta.Mark.AdjustForDeletion(start, end)
 
 				// Skip if this buffer set is not linked to the file being edited.
 				if buffSet.EditBuffer != e.editBuffer {
@@ -286,6 +287,32 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end rows.R
 			}
 		}
 		break
+	}
+
+	for _, a := range marks.Marks.Items() {
+		m, ok := a.(*mark.Mark)
+		if !ok {
+			continue
+		}
+
+		switch sync {
+		case INSERT:
+			m.AdjustForInsertion(start, end)
+
+			// Skip if this buffer set is not linked to the file being edited.
+			if m.EditBuffer != e.editBuffer {
+				continue
+			}
+			m.RowsPos.AdjustForInsertion(start, end)
+		case DELETE:
+			m.AdjustForDeletion(start, end)
+
+			// Skip if this buffer set is not linked to the file being edited.
+			if m.EditBuffer != e.editBuffer {
+				continue
+			}
+			m.RowsPos.AdjustForDeletion(start, end)
+		}
 	}
 
 	// Synchronize cursor positions and buffer boundaries in other editors linked to the same file.
@@ -321,18 +348,18 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end rows.R
 			return
 		} */
 
-		for _, mark := range *Marks {
+		/* for _, mark := range *Marks {
 			switch sync {
 			case INSERT:
 				mark.AdjustForInsertion(start, end)
 			case DELETE:
 				mark.AdjustForDeletion(start, end)
 			}
-		}
+		} */
 
 		switch sync {
 		case INSERT:
-			editor.meta.Mark.AdjustForInsertion(start, end)
+			// editor.meta.Mark.AdjustForInsertion(start, end)
 
 			if editor != e {
 				editor.meta.RowsPos.AdjustForInsertion(start, end)
@@ -342,7 +369,7 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end rows.R
 				}
 			}
 		case DELETE:
-			editor.meta.Mark.AdjustForDeletion(start, end)
+			// editor.meta.Mark.AdjustForDeletion(start, end)
 
 			if editor != e {
 				editor.meta.RowsPos.AdjustForDeletion(start, end)
@@ -353,6 +380,33 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end rows.R
 			}
 		}
 	})
+
+	for _, a := range marks.Marks.Items() {
+		m, ok := a.(*mark.Mark)
+		if !ok {
+			continue
+		}
+
+		switch sync {
+		case INSERT:
+			m.AdjustForInsertion(start, end)
+		case DELETE:
+			m.AdjustForDeletion(start, end)
+		}
+	}
+	/* marks.Marks.Each(func(a marks.Mark) {
+		m, ok := a.(*mark.Mark)
+		if !ok {
+			return
+		}
+
+		switch sync {
+		case INSERT:
+			m.AdjustForInsertion(start, end)
+		case DELETE:
+			m.AdjustForDeletion(start, end)
+		}
+	}) */
 }
 
 // --------------------
@@ -472,7 +526,7 @@ func (e *Editorleaf) setCellInEditArea(x, y int, style tcell.Style, ch rune, chW
 
 // Editor.editArea as relative coordinates
 func (e *Editorleaf) fillInEditArea(
-	rect utils.Rect,
+	rect screen.Rect,
 	r rune,
 	style tcell.Style,
 ) {
@@ -526,7 +580,7 @@ func (e *Editorleaf) fillInEditArea(
 }
 
 // Editor.editArea as relative coordinates
-/* func (e *Editorleaf) fillInEditArea_1(rect utils.Rect, r rune, style tcell.Style) {
+/* func (e *Editorleaf) fillInEditArea_1(rect screen.Rect, r rune, style tcell.Style) {
 	if rect.Y < 0 || rect.Y >= e.editArea.Height ||
 		rect.X < 0 || rect.X >= e.editArea.Width {
 		return
@@ -702,7 +756,7 @@ func (e *Editorleaf) drawEditorleaf() bool {
 	// clear remaining area
 	h := Height - y
 	if h > 0 {
-		e.fillInEditArea(utils.Rect{
+		e.fillInEditArea(screen.Rect{
 			X:      0,
 			Y:      y,
 			Width:  Width,
@@ -710,7 +764,7 @@ func (e *Editorleaf) drawEditorleaf() bool {
 		}, 0, theme.ColorDefault)
 
 		// line number area
-		e.screen.FillRect(utils.Rect{
+		e.screen.FillRect(screen.Rect{
 			X:      e.editArea.X,
 			Y:      y,
 			Width:  e.lineNumberWidth,
@@ -1040,7 +1094,7 @@ func (e *Editorleaf) drawLineWithCompute(
 					}
 					e.setCellInEditArea(sx, sy, currentCell.Style, currentCell.Ch, currentCell.Width)
 					/*
-						e.fillInEditArea(utils.Rect{ // 実行されていない、もしくは意味ない？
+						e.fillInEditArea(screen.Rect{ // 実行されていない、もしくは意味ない？
 							X:      sx + currentCell.Width,
 							Y:      sy,
 							Width:  contentWidth - (sx + currentCell.Width),
@@ -1065,7 +1119,7 @@ func (e *Editorleaf) drawLineWithCompute(
 							s = s.Background(theme.ColorColumnLimitOverflowBackground)
 						}
 						e.setCellInEditArea(sx-prevCell.Width, sy, s, theme.MarkContinue, 1)
-						e.fillInEditArea(utils.Rect{
+						e.fillInEditArea(screen.Rect{
 							X:      sx - prevCell.Width + 1,
 							Y:      sy,
 							Width:  contentWidth - (sx - prevCell.Width - 1),
@@ -1141,7 +1195,7 @@ func (e *Editorleaf) drawLineWithCompute(
 						}
 						e.setCellInEditArea(sx, sy, s, theme.MarkContinue, 1)
 						/*
-							e.fillInEditArea(utils.Rect{ // 実行されていない、もしくは意味ない？
+							e.fillInEditArea(screen.Rect{ // 実行されていない、もしくは意味ない？
 								X:      sx + 1,
 								Y:      sy,
 								Width:  contentWidth - (sx + 1),
@@ -1188,7 +1242,7 @@ func (e *Editorleaf) drawLineWithCompute(
 						s = s.Background(theme.ColorColumnLimitOverflowBackground)
 					}
 					e.setCellInEditArea(sx, sy, s, theme.MarkContinue, 1)
-					e.fillInEditArea(utils.Rect{X: sx + 1, Y: sy, // 必要
+					e.fillInEditArea(screen.Rect{X: sx + 1, Y: sy, // 必要
 						Width: contentWidth - (sx + 1), Height: 1},
 						0, theme.ColorDefault.Underline(isUnderline()))
 				}
@@ -1203,7 +1257,7 @@ func (e *Editorleaf) drawLineWithCompute(
 
 				// Fill Hanging Indent Width
 				if isDraw && wrapped && hangingIndentWidth > 0 {
-					e.fillInEditArea(utils.Rect{X: 0, Y: sy, // 必要
+					e.fillInEditArea(screen.Rect{X: 0, Y: sy, // 必要
 						Width:  hangingIndentWidth,
 						Height: 1},
 						0, theme.ColorDefault.Underline(isUnderline()))
@@ -1231,7 +1285,7 @@ func (e *Editorleaf) drawLineWithCompute(
 					TotalCellWidth:           totalCellWidthForTab + currentCell.Width, // ★★
 				})
 				if isDraw {
-					e.fillInEditArea(utils.Rect{ // ★★ ここで,ほぼ全ての行のコンテンツ以降を塗りつぶしている
+					e.fillInEditArea(screen.Rect{ // ★★ ここで,ほぼ全ての行のコンテンツ以降を塗りつぶしている
 						X:      sx + currentCell.Width,
 						Y:      sy,
 						Width:  contentWidth - (sx + currentCell.Width),
@@ -1246,7 +1300,7 @@ func (e *Editorleaf) drawLineWithCompute(
 
 		// Fill Hanging Indent Width
 		if isDraw && wrapped && hangingIndentWidth > 0 {
-			e.fillInEditArea(utils.Rect{X: 0, Y: sy,
+			e.fillInEditArea(screen.Rect{X: 0, Y: sy,
 				Width:  hangingIndentWidth,
 				Height: 1},
 				0, theme.ColorDefault.Underline(isUnderline()))
@@ -1274,6 +1328,7 @@ func (e *Editorleaf) drawLineWithCompute(
 	return sy - startScreenY, false
 }
 
+// without compute boundary
 func (e *Editorleaf) drawLine(
 	startScreenY, rowIndex, cursorLogicalCY int,
 ) (int, bool) {
@@ -1340,7 +1395,7 @@ func (e *Editorleaf) drawLine(
 			if underline {
 				style = style.Underline(underline)
 			}
-			e.fillInEditArea(utils.Rect{
+			e.fillInEditArea(screen.Rect{
 				X:      0,
 				Y:      sy,
 				Width:  hangingIndentWidth,
@@ -1370,12 +1425,12 @@ func (e *Editorleaf) drawLine(
 				}
 				e.setCellInEditArea(sx, sy, style, cell.Ch, cell.Width)
 			} else if locale.Is(cell, locale.EOF) {
-				if /* cell.Style == theme.ColorMarkEOF && */ e.isColumnOver(sx, sy, cell.Width) {
+				if cell.Style == theme.ColorMarkEOF && e.isColumnOver(sx, sy, cell.Width) {
 					style = style.Background(theme.ColorColumnLimitOverflowBackground)
 				}
 				e.setCellInEditArea(sx, sy, style, cell.Ch, cell.Width)
 			} else {
-				if /* cell.Style == theme.ColorDefault && */ e.isColumnOver(sx, sy, cell.Width) {
+				if cell.Style == theme.ColorDefault && e.isColumnOver(sx, sy, cell.Width) {
 					style = style.Background(theme.ColorColumnLimitOverflowBackground)
 				}
 				e.setCellInEditArea(sx, sy, style, cell.Ch, cell.Width)
@@ -1401,7 +1456,7 @@ func (e *Editorleaf) drawLine(
 		if underline {
 			style = style.Underline(underline)
 		}
-		e.fillInEditArea(utils.Rect{
+		e.fillInEditArea(screen.Rect{
 			X:      sx,
 			Y:      sy,
 			Width:  contentWidth - sx,
@@ -1432,14 +1487,14 @@ func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, h i
 			y = e.editArea.Y
 			h += startScreenY
 		}
-		e.screen.FillRect(utils.Rect{X: e.editArea.X, Y: y,
+		e.screen.FillRect(screen.Rect{X: e.editArea.X, Y: y,
 			Width:  e.lineNumberWidth,
 			Height: h},
 			0, theme.ColorLineNumber)
 
 		// Underline on line number area
 		if cursorLineY != -1 {
-			e.screen.FillRect(utils.Rect{X: e.editArea.X, Y: e.editArea.Y + cursorLineY,
+			e.screen.FillRect(screen.Rect{X: e.editArea.X, Y: e.editArea.Y + cursorLineY,
 				Width:  e.lineNumberWidth,
 				Height: 1},
 				0, theme.ColorLineNumber.Underline(true))

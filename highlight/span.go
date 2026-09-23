@@ -2,6 +2,7 @@ package highlight
 
 import (
 	"github.com/gdamore/tcell/v3"
+
 	"github.com/ge-editor/editorleaf/editbuffer/rows"
 )
 
@@ -20,6 +21,7 @@ const (
 	LayerSemantic         // buffer
 	LayerSearch           // meta
 	LayerSelection        // meta
+	LayerCursor           // meta, multi cursor
 )
 
 type Span struct {

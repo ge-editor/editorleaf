@@ -22,6 +22,14 @@ func (h *Highlights) GetSpan(index int) *Span {
 	return (*h.Spans[index]).GetSpan()
 }
 
+func (h *Highlights) AppendSpan(span *SpanTemplate) {
+	h.Spans = append(h.Spans, span)
+}
+
+func (h *Highlights) Clear() {
+	(*h).Spans = (*h).Spans[:0]
+}
+
 /*
 func (h *Highlights) First() {
 	h.Index = 0

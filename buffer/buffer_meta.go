@@ -3,7 +3,6 @@ package buffer
 import (
 	"github.com/ge-editor/editorleaf/editbuffer/rows"
 	"github.com/ge-editor/editorleaf/highlight"
-	"github.com/ge-editor/editorleaf/mark"
 	"github.com/ge-editor/editorleaf/search"
 	"github.com/ge-editor/gecore/screen"
 )
@@ -40,7 +39,7 @@ func newMeta() *Meta {
 		// PrevLogicalCY:       0, // When the logical number of lines increases
 
 		ModelineCx: 0, // Number of columns to display
-		Mark:       nil,
+		// Mark:       nil,
 
 		Search:         &search.SearchResults{},
 		HighlightLayer: &highlight.HighlightsLayer{},
@@ -62,8 +61,8 @@ type Meta struct {
 	// PrevNumberOfLogical int // When the logical number of lines increases
 	//PrevLogicalCY       int                  // When the logical number of lines increases
 
-	ModelineCx int        // Number of columns to display in the modeline
-	Mark       *mark.Mark // ※ 参照型
+	ModelineCx int // Number of columns to display in the modeline
+	// Mark       *mark.Mark // ※ 参照型
 
 	StartDrawRowIndex     int
 	StartDrawLogicalIndex int
@@ -81,12 +80,12 @@ func (m *Meta) DeepCopy() *Meta {
 	nm := *m // 構造体の値コピー（ここが重要）
 
 	// --- ポインタフィールドだけ個別処理 ---
-	if m.Mark != nil {
+	/* if m.Mark != nil {
 		markCopy := *m.Mark
 		nm.Mark = &markCopy
 	} else {
 		nm.Mark = nil
-	}
+	} */
 
 	/*
 		if m.Search != nil {
