@@ -879,12 +879,12 @@ func (e *Editorleaf) detectHangingIndent(rowIndex int) (int, int, bool) {
 		}
 
 		width := 0
-		if r == '\t' {
+		switch r {
+		case '\t':
 			width = utils.TabWidth(totalCellWidthForTab, e.editBuffer.GetTabWidth())
-		} else if r == ' ' {
+		case ' ':
 			width = utils.RuneWidth(r)
-		} else {
-			break
+		default:
 		}
 
 		totalCellWidthForTab += width
@@ -1015,12 +1015,10 @@ func (e *Editorleaf) drawLineWithCompute(
 	for bytePosOfRow := 0; bytePosOfRow < rowBytes; {
 		select {
 		case <-ctx.Done():
-			// if isDraw {
 			gelog.Debug("Cancel drawLineWithCompute")
 			gecore.Echo.AddText("Cancel drawLineWithCompute")
 			e.bsArray.ClearRow(rowIndex)
 			return -1, true // canceled
-			//}
 		default:
 		}
 
@@ -1104,6 +1102,7 @@ func (e *Editorleaf) drawLineWithCompute(
 				}
 			} else if breakpoint.IsEmpty() {
 				if locale.Is(currentCell, locale.PROHIBITED) {
+					// gelog.Debug("折り返した直後が禁則文字だった場合の処理")
 					// 折り返した直後が禁則文字だった場合の処理
 					// currentCell は次の論理行頭だが、禁則文字だった場合
 					bo = append(bo, Boundary{
@@ -1136,21 +1135,30 @@ func (e *Editorleaf) drawLineWithCompute(
 							prevCell.Ch, s, 1, 1, prevCell.Class,
 							sy-startScreenY, sx, hangingIndentWidth)
 						if isDraw {
-							if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
+							if isNoSpanStyle && e.isColumnOver(sx, sy, prevCell.Width) {
 								s = s.Background(theme.ColorColumnLimitOverflowBackground)
 							}
 							e.setCellInEditArea(sx, sy, s, '^', 1)              // ★
 							e.setCellInEditArea(sx+1, sy, s, prevCell.Ch+64, 1) // ★
 						}
 					} else {
+						// gelog.Debug("折り返した後の情報で再設定")
 						// 折り返した後の情報で再設定
+						// Color column limit overflow background
+						s := prevCell.Style.Underline(false)
+						if s == theme.ColorDefault.Background(theme.ColorColumnLimitOverflowBackground) {
+							s = theme.ColorDefault
+						}
+						s = s.Underline(isUnderline())
 						cacheCellInfo(&runeWidth, bytePosOfRow-prevCell.Size,
 							prevCell.Ch, s, prevCell.Size, prevCell.Width, prevCell.Class,
 							sy-startScreenY, sx, hangingIndentWidth)
 						if isDraw {
-							if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
-								s = s.Background(theme.ColorColumnLimitOverflowBackground)
-							}
+							/*
+								if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
+									s = s.Background(theme.ColorColumnLimitOverflowBackground)
+								}
+							*/
 							e.setCellInEditArea(sx, sy, s, prevCell.Ch, prevCell.Width) // ★
 						}
 					}
@@ -1174,12 +1182,15 @@ func (e *Editorleaf) drawLineWithCompute(
 							currentCell.Ch, s, currentCell.Size, currentCell.Width, currentCell.Class,
 							sy-startScreenY, sx, hangingIndentWidth)
 						if isDraw {
-							if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
-								s = s.Background(theme.ColorColumnLimitOverflowBackground)
-							}
+							/*
+								if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
+									s = s.Background(theme.ColorColumnLimitOverflowBackground)
+								}
+							*/
 							e.setCellInEditArea(sx, sy, s, currentCell.Ch, currentCell.Width) // ★★
 						}
 					}
+					// End of 折り返した直後が禁則文字だった場合の処理
 				} else {
 					bo = append(bo, Boundary{
 						StartLogicalRowByteIndex: startLogicalRowByteIndex,
