@@ -169,7 +169,7 @@ func (e *Editorleaf) SearchRegexp(searchTerm string, caseSensitive bool) {
 				case <-ctx.Done():
 					return
 				default:
-					a := NewFoundPosition(rowIndex, match[0], rowIndex, match[1], theme.ColorSearchFound)
+					a := NewFoundPosition(rowIndex, match[0], rowIndex, match[1], theme.ColorSearchFound, theme.ColorSearchFoundOnCursor)
 					b := (highlight.SpanTemplate)(a)
 					hls.AppendSpan(&b)
 					// searchIndex++
@@ -225,7 +225,7 @@ func (e *Editorleaf) searchText(text string, caseSensitive bool) {
 					}
 					startIndex := len(line[:index+findIndex])
 					stopIndex := startIndex + textBytesLen
-					a := NewFoundPosition(i, startIndex, i, stopIndex, theme.ColorSearchFound)
+					a := NewFoundPosition(i, startIndex, i, stopIndex, theme.ColorSearchFound, theme.ColorSearchFoundOnCursor)
 					b := (highlight.SpanTemplate)(a)
 					hls.AppendSpan(&b)
 					index += findIndex + textBytesLen
@@ -291,7 +291,7 @@ func (e *Editorleaf) ReplaceCurrentSearchString(str string) {
 	// search.Results = slices.Delete(search.Results, search.CurrentSearchIndex, search.CurrentSearchIndex+1)
 }
 
-func NewFoundPosition(startRowIndex, startColIndex, stopRowIndex, stopColIndex int, color tcell.Style) *search.SearchResult {
+func NewFoundPosition(startRowIndex, startColIndex, stopRowIndex, stopColIndex int, color, ColorOnCursor tcell.Style) *search.SearchResult {
 	return &search.SearchResult{
 		Span: &highlight.Span{
 			Start: rows.RowsPos{
@@ -302,8 +302,9 @@ func NewFoundPosition(startRowIndex, startColIndex, stopRowIndex, stopColIndex i
 				RowIndex: stopRowIndex,
 				ColIndex: stopColIndex,
 			},
-			Color:    color,
-			Priority: highlight.LayerSearch,
+			Color:         color,
+			ColorIfActive: ColorOnCursor,
+			Priority:      highlight.LayerSearch,
 		},
 		// Matches: ,
 	}
@@ -347,69 +348,4 @@ func (s highlightPosStatus) Get(layer, priority int) int {
 
 func (s *highlightPosStatus) Clear() {
 	*s = nil
-}
-
-// HighlightsLayer の情報から描画色を決定する
-// highlightPosStatus 以降で pos と Traverse な関係にある highlights.Span を返す。
-func (e Editorleaf) FindHighlightSpan(
-	pos rows.RowsPos,
-	stat highlightPosStatus,
-) (*highlight.Span, highlightPosStatus) {
-
-	maxPriority := max(
-		e.meta.HighlightLayer.MaxPriority(),
-		e.highlightLayer.MaxPriority(),
-	)
-
-	for priorityIndex := maxPriority; priorityIndex >= 0; priorityIndex-- {
-
-		// e.meta.HighlightLayer と e.highlightLayer では、
-		// 同一 priorityIndex において、両方が Highlights を持つことはない。
-		// 両方が Highlights を持たないことはある。
-		layerIndex := highlightMeta
-		hl := e.meta.HighlightLayer.Highlights(priorityIndex)
-
-		if hl == nil {
-			layerIndex = highlightEditor
-			hl = e.highlightLayer.Highlights(priorityIndex)
-		}
-
-		if hl == nil {
-			continue
-		}
-
-		currentSpanIndex := stat.Get(layerIndex, priorityIndex)
-
-		// 現在位置とマッチしているか確認
-		if currentSpanIndex >= 0 &&
-			currentSpanIndex < hl.SpansLength() {
-
-			span := hl.GetSpan(currentSpanIndex)
-
-			if highlight.PosInSpan(pos, span) {
-				return span, stat
-			}
-		}
-
-		// 現在位置から再検索
-		spanIndex := hl.MatcheFirstRegenSpanIndex(
-			pos,
-			max(0, currentSpanIndex),
-		)
-
-		if spanIndex == -1 {
-			continue
-		}
-
-		span := hl.GetSpan(spanIndex)
-		if span == nil {
-			continue
-		}
-
-		stat.Set(layerIndex, priorityIndex, spanIndex)
-
-		return span, stat
-	}
-
-	return nil, stat
 }

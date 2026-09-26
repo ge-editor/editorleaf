@@ -25,10 +25,11 @@ const (
 )
 
 type Span struct {
-	Start    rows.RowsPos
-	End      rows.RowsPos
-	Color    tcell.Style
-	Priority int
+	Start         rows.RowsPos
+	End           rows.RowsPos
+	Color         tcell.Style
+	ColorIfActive tcell.Style // For example, when the cursor is over a span
+	Priority      int
 }
 
 // 例えば

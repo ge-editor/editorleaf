@@ -505,16 +505,6 @@ func (e *Editorleaf) setCellInEditArea(x, y int, style tcell.Style, ch rune, chW
 		return
 	}
 
-	/*
-		columnLimit := 80 // language package で定義する
-
-		if e.mode != ModeMinibuffer &&
-			style == theme.ColorDefault &&
-			(x >= columnLimit || (chWidth > 1 && x == columnLimit-1)) {
-			style = style.Background(theme.ColorColumnLimitOverflowBackground)
-		}
-	*/
-
 	px := x + e.editArea.X + e.lineNumberWidth
 
 	e.screen.SetContent(px, y+e.editArea.Y, ch, nil, style)
@@ -536,7 +526,7 @@ func (e *Editorleaf) fillInEditArea(
 		return
 	}
 
-	const columnLimit = 80
+	columnLimit := (*e.editBuffer.GetLangMode()).RecommendedColumnWidth()
 
 	// screen absolute position
 	screenX := rect.X + e.editArea.X + e.lineNumberWidth
@@ -544,7 +534,7 @@ func (e *Editorleaf) fillInEditArea(
 
 	overflowStyle := style.Background(theme.ColorColumnLimitOverflowBackground)
 
-	// 80桁以内
+	// Recommended Column Width 桁 以内
 	if e.mode == ModeMinibuffer || rect.X+rect.Width <= columnLimit {
 		rect.X = screenX
 		rect.Y = screenY
@@ -552,7 +542,7 @@ func (e *Editorleaf) fillInEditArea(
 		return
 	}
 
-	// 完全に80桁超え
+	// Over Recommended Column Width
 	if e.mode != ModeMinibuffer && rect.X >= columnLimit {
 		overflowStyle = style.Background(theme.ColorColumnLimitOverflowBackground)
 
@@ -562,7 +552,7 @@ func (e *Editorleaf) fillInEditArea(
 		return
 	}
 
-	// 80桁をまたぐ
+	// Recommended Column Width 桁 をまたぐ
 	leftWidth := columnLimit - rect.X
 	rightWidth := rect.Width - leftWidth
 
@@ -578,19 +568,6 @@ func (e *Editorleaf) fillInEditArea(
 	right.Width = rightWidth
 	e.screen.FillRect(right, r, overflowStyle)
 }
-
-// Editor.editArea as relative coordinates
-/* func (e *Editorleaf) fillInEditArea_1(rect screen.Rect, r rune, style tcell.Style) {
-	if rect.Y < 0 || rect.Y >= e.editArea.Height ||
-		rect.X < 0 || rect.X >= e.editArea.Width {
-		return
-	}
-
-	rect.X += e.editArea.X + e.lineNumberWidth
-	rect.Y += e.editArea.Y
-	e.screen.FillRect(rect, r, style)
-}
-*/
 
 // Returns bool whether it is the rightmost view
 func (e *Editorleaf) rightmost() bool {
@@ -948,11 +925,10 @@ func (e *Editorleaf) isColumnOver(x, y int, chWidth int) bool {
 		return false
 	}
 
-	columnLimit := 80 // language package で定義する
+	columnLimit := (*e.editBuffer.GetLangMode()).RecommendedColumnWidth()
 
 	if e.mode != ModeMinibuffer &&
 		(x >= columnLimit || (chWidth > 1 && x == columnLimit-1)) {
-		// style = style.Background(theme.ColorColumnLimitOverflowBackground)
 		return true
 	}
 
@@ -1056,9 +1032,13 @@ func (e *Editorleaf) drawLineWithCompute(
 
 		// Highlight Style
 		isNoSpanStyle := true
-		span, _ := e.FindHighlightSpan(rows.RowsPos{RowIndex: rowIndex, ColIndex: bytePosOfRow}, stat)
+		span, _, isOnCursor := e.FindHighlightSpan(rows.RowsPos{RowIndex: rowIndex, ColIndex: bytePosOfRow}, stat)
 		if span != nil {
-			currentCell.Style = span.Color
+			if isOnCursor {
+				currentCell.Style = span.ColorIfActive
+			} else {
+				currentCell.Style = span.Color
+			}
 			isNoSpanStyle = false
 		}
 
@@ -1542,6 +1522,81 @@ func (e *Editorleaf) drawLineNumberNumber(n int, x, y int, style tcell.Style) {
 		n /= 10
 		x--
 	}
+}
+
+// HighlightsLayer の情報から描画色を決定する
+// highlightPosStatus 以降で pos と Traverse な関係にある highlights.Span を返す。
+func (e Editorleaf) FindHighlightSpan(
+	pos rows.RowsPos,
+	stat highlightPosStatus,
+) (*highlight.Span, highlightPosStatus, bool) {
+
+	maxPriority := max(
+		e.meta.HighlightLayer.MaxPriority(),
+		e.highlightLayer.MaxPriority(),
+	)
+
+	for priorityIndex := maxPriority; priorityIndex >= 0; priorityIndex-- {
+
+		// e.meta.HighlightLayer と e.highlightLayer では、
+		// 同一 priorityIndex において、両方が Highlights を持つことはない。
+		// 両方が Highlights を持たないことはある。
+		layerIndex := highlightMeta
+		hl := e.meta.HighlightLayer.Highlights(priorityIndex)
+
+		if hl == nil {
+			layerIndex = highlightEditor
+			hl = e.highlightLayer.Highlights(priorityIndex)
+		}
+
+		if hl == nil {
+			continue
+		}
+
+		currentSpanIndex := stat.Get(layerIndex, priorityIndex)
+
+		// 現在位置とマッチしているか確認
+		if currentSpanIndex >= 0 &&
+			currentSpanIndex < hl.SpansLength() {
+
+			span := hl.GetSpan(currentSpanIndex)
+
+			if highlight.PosInSpan(pos, span) {
+				isOnCursor := false
+				// カーソル位置が含まれているか
+				if highlight.PosInSpan(e.meta.RowsPos, span) {
+					isOnCursor = true
+				}
+				return span, stat, isOnCursor
+			}
+		}
+
+		// 現在位置から再検索
+		spanIndex := hl.MatcheFirstRegenSpanIndex(
+			pos,
+			max(0, currentSpanIndex),
+		)
+
+		if spanIndex == -1 {
+			continue
+		}
+
+		span := hl.GetSpan(spanIndex)
+		if span == nil {
+			continue
+		}
+
+		stat.Set(layerIndex, priorityIndex, spanIndex)
+
+		isOnCursor := false
+		// カーソル位置が含まれているか
+		if highlight.PosInSpan(e.meta.RowsPos, span) {
+			isOnCursor = true
+		}
+		return span, stat, isOnCursor
+	}
+
+	return nil, stat, false
 }
 
 func cacheCellInfo(
