@@ -1160,6 +1160,12 @@ func (e *Editorleaf) Redo() {
 			gelog.Debug("Redo INSERT", "a", a.Data.String([]byte{'\n'}))
 			e.meta.RowsPos = a.Before
 			e.insertRows(a.Data, false)
+			// 呼び出し不足分を追加
+			e.syncCursorAndBufferForEdit(
+				INSERT,
+				a.Before,
+				a.After,
+			)
 			e.meta.RowsPos = a.After
 
 		case editbuffer.DELETE_BACKWARD:
@@ -1175,12 +1181,10 @@ func (e *Editorleaf) Redo() {
 				a.Before,
 				a.After,
 			)
-			// これでいいかな。
-			// e.meta.RowsPos = a.After
 			e.meta.RowsPos = a.Before
 
 		case editbuffer.DELETE:
-			gelog.Debug("Redo DELETE", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.String([]byte{'\n'}))
+			// gelog.Debug("Redo DELETE", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.String([]byte{'\n'}))
 
 			cursor := e.cursorAfterDelete(a)
 
