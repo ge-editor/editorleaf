@@ -172,7 +172,6 @@ func (e *Editorleaf) MoveCursorBackward() {
 		e.meta.RowsPos.RowIndex--
 
 		prevBs := e.bsArray.LastBoundary(e.meta.RowsPos.RowIndex)
-		// gelog.Debug("prev Boundary", fmt.Sprintf("StartLogicalRowByteIndex: %d, StopLogicalRowByteIndex: %d, LogicalRowWidth: %d, TotalCellWidth: %d, ", prevBs.StartLogicalRowByteIndex, prevBs.StopLogicalRowByteIndex, prevBs.LogicalRowWidth, prevBs.TotalCellWidth))
 
 		// on newline
 		x = prevBs.LogicalRowWidth - 1
@@ -712,7 +711,12 @@ func (e *Editorleaf) DeleteRuneBackward() {
 		}
 	})
 
-	e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{Class: editbuffer.DELETE_BACKWARD, Before: stop, After: start, Data: removed}, true)
+	e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{
+		Class:  editbuffer.DELETE_BACKWARD,
+		Before: stop,
+		After:  start,
+		Data:   removed,
+	}, true)
 	e.syncCursorAndBufferForEdit(DELETE, start, stop)
 }
 
@@ -853,7 +857,12 @@ func (e *Editorleaf) KillLine() {
 	})
 
 	e.syncCursorAndBufferForEdit(DELETE, e.meta.RowsPos, stop)
-	e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{Class: editbuffer.DELETE, Before: e.meta.RowsPos, After: e.meta.RowsPos, Data: removed}, true)
+	e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{
+		Class:  editbuffer.DELETE,
+		Before: e.meta.RowsPos,
+		After:  e.meta.RowsPos,
+		Data:   removed,
+	}, true)
 }
 
 // --------------------
@@ -874,7 +883,6 @@ func (e *Editorleaf) Yank() {
 	if b == nil {
 		return
 	}
-	// e.insertBytes(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex, r)
 	e.insertBytesArray(b, true)
 }
 
@@ -1104,6 +1112,30 @@ func (e *Editorleaf) Undo() {
 			)
 			e.meta.RowsPos = a.Before
 
+			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
+			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
+			/*
+				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+					ed, ok := l.(*Editorleaf)
+					if !ok {
+						return
+					}
+
+					var start int
+					count := a.After.RowIndex - a.Before.RowIndex
+					if a.Before.ColIndex == 0 && a.After.ColIndex == 0 { // 行単位
+						start = a.Before.RowIndex
+					} else {
+						ed.bsArray.ClearRow(a.Before.RowIndex)
+						start = a.Before.RowIndex + 1
+					}
+					if count > 0 {
+						ed.bsArray.Delete(start, count)
+					}
+				})
+			*/
+			e.rebuildBufferState(a.Before, a.After, editbuffer.DELETE)
+
 		case editbuffer.DELETE:
 			gelog.Debug("Undo DELETE", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.String([]byte{'\n'}))
 
@@ -1117,6 +1149,31 @@ func (e *Editorleaf) Undo() {
 				a.Before,
 				a.After,
 			)
+
+			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
+			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
+			/*
+				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+					ed, ok := l.(*Editorleaf)
+					if !ok {
+						return
+					}
+
+					var start int
+					count := a.After.RowIndex - a.Before.RowIndex
+					if a.Before.ColIndex == 0 && a.After.ColIndex == 0 { // 行単位
+						start = a.Before.RowIndex
+					} else {
+						ed.bsArray.ClearRow(a.Before.RowIndex)
+						start = a.Before.RowIndex + 1
+					}
+					if count > 0 {
+						ed.bsArray.Insert(start, count)
+					}
+				})
+			*/
+			e.rebuildBufferState(a.Before, a.After, editbuffer.INSERT)
+
 			e.meta.RowsPos = a.Before
 
 		case editbuffer.DELETE_BACKWARD:
@@ -1128,6 +1185,31 @@ func (e *Editorleaf) Undo() {
 				a.After,
 				a.Before,
 			)
+
+			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
+			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
+			/*
+				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+					ed, ok := l.(*Editorleaf)
+					if !ok {
+						return
+					}
+
+					var start int
+					count := a.Before.RowIndex - a.After.RowIndex
+					if a.Before.ColIndex == 0 && a.After.ColIndex == 0 { // 行単位
+						start = a.After.RowIndex
+					} else {
+						ed.bsArray.ClearRow(a.After.RowIndex)
+						start = a.After.RowIndex + 1
+					}
+					if count > 0 {
+						ed.bsArray.Insert(start, count)
+					}
+				})
+			*/
+			e.rebuildBufferState(a.After, a.Before, editbuffer.INSERT)
+
 			e.meta.RowsPos = a.After
 
 		default:
@@ -1136,7 +1218,7 @@ func (e *Editorleaf) Undo() {
 
 	}
 
-	e.rebuildBufferState()
+	// e.rebuildBufferState()
 
 	gecore.Echo.AddText("Undo!")
 }
@@ -1160,12 +1242,37 @@ func (e *Editorleaf) Redo() {
 			gelog.Debug("Redo INSERT", "a", a.Data.String([]byte{'\n'}))
 			e.meta.RowsPos = a.Before
 			e.insertRows(a.Data, false)
-			// 呼び出し不足分を追加
+			// Keep editor state synchronized with the redo operation.
 			e.syncCursorAndBufferForEdit(
 				INSERT,
 				a.Before,
 				a.After,
 			)
+
+			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
+			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
+			/*
+				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+					ed, ok := l.(*Editorleaf)
+					if !ok {
+						return
+					}
+
+					var start int
+					count := a.After.RowIndex - a.Before.RowIndex
+					if a.Before.ColIndex == 0 && a.After.ColIndex == 0 { // 行単位
+						start = a.Before.RowIndex
+					} else {
+						ed.bsArray.ClearRow(a.Before.RowIndex)
+						start = a.Before.RowIndex + 1
+					}
+					if count > 0 {
+						ed.bsArray.Insert(start, count)
+					}
+				})
+			*/
+			e.rebuildBufferState(a.Before, a.After, editbuffer.INSERT)
+
 			e.meta.RowsPos = a.After
 
 		case editbuffer.DELETE_BACKWARD:
@@ -1181,6 +1288,31 @@ func (e *Editorleaf) Redo() {
 				a.Before,
 				a.After,
 			)
+
+			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
+			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
+			/*
+				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+					ed, ok := l.(*Editorleaf)
+					if !ok {
+						return
+					}
+
+					var start int
+					count := a.After.RowIndex - a.Before.RowIndex
+					if a.Before.ColIndex == 0 && a.After.ColIndex == 0 { // 行単位
+						start = a.Before.RowIndex
+					} else {
+						ed.bsArray.ClearRow(a.Before.RowIndex)
+						start = a.Before.RowIndex + 1
+					}
+					if count > 0 {
+						ed.bsArray.Delete(start, count)
+					}
+				})
+			*/
+			e.rebuildBufferState(a.Before, a.After, editbuffer.DELETE)
+
 			e.meta.RowsPos = a.Before
 
 		case editbuffer.DELETE:
@@ -1197,6 +1329,31 @@ func (e *Editorleaf) Redo() {
 				a.Before,
 				cursor,
 			)
+
+			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
+			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
+			/*
+						tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+							ed, ok := l.(*Editorleaf)
+							if !ok {
+					return
+				}
+
+							var start int
+							count := cursor.RowIndex - a.Before.RowIndex
+							if a.Before.ColIndex == 0 && cursor.ColIndex == 0 { // 行単位
+								start = a.Before.RowIndex
+							} else {
+								ed.bsArray.ClearRow(a.Before.RowIndex)
+								start = a.Before.RowIndex + 1
+							}
+							if count > 0 {
+								ed.bsArray.Delete(start, count)
+							}
+						})
+			*/
+			e.rebuildBufferState(a.Before, cursor, editbuffer.DELETE)
+
 			e.meta.RowsPos = a.After
 
 		default:
@@ -1205,7 +1362,7 @@ func (e *Editorleaf) Redo() {
 
 	}
 
-	e.rebuildBufferState()
+	// e.rebuildBufferState()
 }
 
 func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) rows.RowsPos {
@@ -1220,48 +1377,36 @@ func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) rows.RowsPos {
 	cursor.RowIndex += len(a.Data) - 1
 	cursor.ColIndex += len(last)
 
-	/*
-		if len(last) > 0 && last[len(last)-1] == '\n' {
-			cursor.RowIndex++
-			cursor.ColIndex = 0
-		}
-	*/
-
 	return cursor
 }
 
-/* func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) screen.Cursor {
-	cursor := a.Before
-
-	if len(a.Data) == 0 {
-		return cursor
-	}
-
-	last := a.Data[len(a.Data)-1]
-
-	cursor.RowIndex += len(a.Data) - 1
-	cursor.ColIndex += len(last)
-
-	if len(last) > 0 && last[len(last)-1] == '\n' {
-		cursor.RowIndex++
-		cursor.ColIndex = 0
-	}
-
-	return cursor
-}
-*/
-
-func (e *Editorleaf) rebuildBufferState() {
+// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
+// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
+func (e *Editorleaf) rebuildBufferState(before, after rows.RowsPos, class editbuffer.ActionClass) {
 	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
 		ed, ok := l.(*Editorleaf)
 		if !ok {
 			return
 		}
 
-		// TODO:
-		// editBuffer の変更結果から bsArray を同期する。
-		// ed.bsArray.Rebuild(ed.editBuffer.Rows)
-		ed.bsArray.ClearAll() // ひとまず このまま
+		// ed.bsArray.ClearAll()
+		// return
+
+		var start int
+		count := after.RowIndex - before.RowIndex
+		if before.ColIndex == 0 && after.ColIndex == 0 { // 行単位
+			start = before.RowIndex
+		} else {
+			ed.bsArray.ClearRow(before.RowIndex)
+			start = before.RowIndex + 1
+		}
+		if count > 0 {
+			if class == editbuffer.INSERT {
+				ed.bsArray.Insert(start, count)
+			} else {
+				ed.bsArray.Delete(start, count)
+			}
+		}
 	})
 }
 
@@ -1371,7 +1516,6 @@ func (e *Editorleaf) insertRows(data rows.Rows, enableUndo bool) {
 
 	// Current cursor
 	e.meta.RowsPos.RowIndex += data.Length() - 1
-	// increase := len(rs.BytesArray()[rs.Length()-1])
 	increase := data.Row(data.Length() - 1).Length()
 	if data.Length() == 1 {
 		e.meta.RowsPos.ColIndex = beforeCursor.ColIndex + increase
@@ -1392,7 +1536,12 @@ func (e *Editorleaf) insertRows(data rows.Rows, enableUndo bool) {
 	})
 
 	if enableUndo {
-		e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{Class: editbuffer.INSERT, Before: beforeCursor, After: e.meta.RowsPos, Data: data}, true)
+		e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{
+			Class:  editbuffer.INSERT,
+			Before: beforeCursor,
+			After:  e.meta.RowsPos,
+			Data:   data,
+		}, true)
 	}
 	e.syncCursorAndBufferForEdit(INSERT, beforeCursor, e.meta.RowsPos)
 

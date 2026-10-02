@@ -514,6 +514,16 @@ func (e *Editorleaf) setCellInEditArea(x, y int, style tcell.Style, ch rune, chW
 	}
 }
 
+func (e *Editorleaf) editAreaYPosition(y int) int {
+	if y < 0 {
+		return -1
+	}
+	if y >= e.editArea.Height {
+		return 1
+	}
+	return 0
+}
+
 // Editor.editArea as relative coordinates
 func (e *Editorleaf) fillInEditArea(
 	rect screen.Rect,
@@ -855,13 +865,14 @@ func (e *Editorleaf) detectHangingIndent(rowIndex int) (int, int, bool) {
 			return 0, 0, false
 		}
 
+		// switch 文への変更不可
 		width := 0
-		switch r {
-		case '\t':
+		if r == '\t' {
 			width = utils.TabWidth(totalCellWidthForTab, e.editBuffer.GetTabWidth())
-		case ' ':
+		} else if r == ' ' {
 			width = utils.RuneWidth(r)
-		default:
+		} else {
+			break
 		}
 
 		totalCellWidthForTab += width
@@ -944,11 +955,12 @@ func (e *Editorleaf) drawLineWithCompute(
 	startScreenY, rowIndex, cursorLogicalCY int,
 	isDraw bool,
 ) (int, bool) {
+	gelog.Debug("drawLineWithCompute")
+
 	stat := highlightPosStatus{}
 
 	// 右端から 折り返し候補を探す探索マージン
 	const rightEdgeWrapMargin = 8 // Search margin from the right edge for wrap candidates.
-	const PageLineCount = 60      // will language に移動する
 
 	contentWidth := e.editArea.Width - e.lineNumberWidth
 
@@ -1311,7 +1323,7 @@ func (e *Editorleaf) drawLineWithCompute(
 
 	// Line number
 	if isDraw && e.mode != ModeMinibuffer {
-		e.drawLineNumber(rowIndex, startScreenY, cursorLineY, len(bo), PageLineCount)
+		e.drawLineNumber(rowIndex, startScreenY, cursorLineY, len(bo))
 	}
 
 	//
@@ -1329,8 +1341,6 @@ func (e *Editorleaf) drawLine(
 			true,
 		)
 	*/
-
-	const PageLineCount = 60 // will language に移動する
 
 	contentWidth := e.editArea.Width - e.lineNumberWidth
 
@@ -1369,15 +1379,6 @@ func (e *Editorleaf) drawLine(
 
 	for logicalRowIndex := startLogicalRowIndex; logicalRowIndex < logicalRowLen; logicalRowIndex++ {
 
-		select {
-		case <-ctx.Done():
-			gelog.Debug("Cancel drawLine")
-			gecore.Echo.AddText("Cancel drawLine")
-			return -1, true
-		default:
-		}
-		// <-time.After(500 * time.Microsecond)
-
 		underline := sy == cursorLineY
 
 		// Fill Hanging Indent Width
@@ -1397,6 +1398,15 @@ func (e *Editorleaf) drawLine(
 		bo := e.bsArray.Boundary(rowIndex, logicalRowIndex)
 
 		for bytePosOfRow := bo.StartLogicalRowByteIndex; bytePosOfRow < bo.StopLogicalRowByteIndex; {
+
+			select {
+			case <-ctx.Done():
+				gelog.Debug("Cancel drawLine")
+				gecore.Echo.AddText("Cancel drawLine")
+				return -1, true
+			default:
+			}
+			// <-time.After(500 * time.Microsecond)
 
 			cell := runeWidthCache[bytePosOfRow]
 			style := cell.Style
@@ -1457,21 +1467,20 @@ func (e *Editorleaf) drawLine(
 		sy++
 		sx = 0 + hangingIndentWidth
 
-		if sy >= e.editArea.Y+e.editArea.Height {
+		if e.editAreaYPosition(sy) == 1 {
 			break
 		}
-
 	} // for
 
 	// Line number
 	if e.mode != ModeMinibuffer {
-		e.drawLineNumber(rowIndex, startScreenY, cursorLineY, logicalRowLen, PageLineCount)
+		e.drawLineNumber(rowIndex, startScreenY, cursorLineY, logicalRowLen)
 	}
 
 	return sy - startScreenY, false
 }
 
-func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, h int, PageLineCount int) {
+func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, h int) {
 	if e.lineNumberWidth > 0 {
 		y := e.editArea.Y + startScreenY
 		if startScreenY < 0 {
@@ -1496,8 +1505,8 @@ func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, h i
 	if startScreenY >= 0 && startScreenY < e.editArea.Height {
 		style := theme.ColorLineNumber
 
-		// 60行単位で色変更
-		pageIndex := rowIndex / PageLineCount
+		// n行単位で色を変更
+		pageIndex := rowIndex / (*e.editBuffer.GetLangMode()).PageLineCount()
 		if pageIndex%2 != 0 {
 			style = theme.ColorLineNumberOnEvenPage
 		}
@@ -1535,6 +1544,7 @@ func (e Editorleaf) FindHighlightSpan(
 		e.meta.HighlightLayer.MaxPriority(),
 		e.highlightLayer.MaxPriority(),
 	)
+	// gelog.Debug("maxPriority", maxPriority)
 
 	for priorityIndex := maxPriority; priorityIndex >= 0; priorityIndex-- {
 

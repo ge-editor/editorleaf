@@ -3,6 +3,7 @@ package editorleaf
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -30,6 +31,7 @@ func (e *Editorleaf) MoveNextFoundWord() {
 	// gelog.Debug("MoveNextFoundWord", "searchResults", searchResults, "SpanLength", l)
 
 	if l == 0 {
+		gecore.Echo.AddText("No search results")
 		return
 	}
 
@@ -55,6 +57,9 @@ func (e *Editorleaf) MoveNextFoundWord() {
 		searchResults.CurrentSearchIndex = 0
 	} else if searchResults.CurrentSearchIndex >= l {
 		searchResults.CurrentSearchIndex = l - 1
+		gecore.Echo.AddText("Last search result")
+	} else {
+		gecore.Echo.AddText(fmt.Sprintf("Search result %d/%d", searchResults.CurrentSearchIndex+1, l))
 	}
 
 	s := h.GetSpanTemplate(highlight.LayerSearch, searchResults.CurrentSearchIndex)
@@ -73,6 +78,7 @@ func (e *Editorleaf) MovePrevFoundWord() {
 
 	l := h.SpanLength(highlight.LayerSearch)
 	if l == 0 {
+		gecore.Echo.AddText("No search results")
 		return
 	}
 
@@ -98,8 +104,11 @@ func (e *Editorleaf) MovePrevFoundWord() {
 
 	if searchResults.CurrentSearchIndex < 0 {
 		searchResults.CurrentSearchIndex = 0
+		gecore.Echo.AddText("First search result")
 	} else if searchResults.CurrentSearchIndex >= l {
 		searchResults.CurrentSearchIndex = l - 1
+	} else {
+		gecore.Echo.AddText(fmt.Sprintf("Search result %d/%d", searchResults.CurrentSearchIndex+1, l))
 	}
 
 	s := h.GetSpanTemplate(highlight.LayerSearch, searchResults.CurrentSearchIndex)

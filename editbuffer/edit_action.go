@@ -69,6 +69,7 @@ type EditAction struct {
 	Before rows.RowsPos
 	After  rows.RowsPos
 	Data   rows.Rows
+	NoJoin bool
 }
 
 func (a *EditAction) Clone() *EditAction {
@@ -262,7 +263,7 @@ func (u *UndoStack) canJoin(last, current *EditAction) bool {
 		return false
 	}
 
-	if last.Class != current.Class {
+	if last.NoJoin || last.Class != current.Class {
 		return false
 	}
 
