@@ -24,6 +24,20 @@ func (h *HighlightsLayer) Highlights(priorityIndex int) *Highlights {
 	return (*h)[priorityIndex]
 }
 
+// Peek は Highlights と違い、priorityIndex のスロットを自動生成しない。
+// まだ存在しなければ nil を返す。FindHighlightSpan のように
+// 「このレイヤーに priorityIndex のデータがあるか」を副作用なしに
+// 確認したい参照側で使う。Highlights() は書き込み側 (AppendSpan 前の
+// 確保、Clear) 用で、呼ぶだけでスロットが生えてしまうため nil
+// チェックの代わりには使えない。
+func (h *HighlightsLayer) Peek(priorityIndex int) *Highlights {
+	if priorityIndex < 0 || priorityIndex >= len(*h) {
+		return nil
+	}
+
+	return (*h)[priorityIndex]
+}
+
 func (h *HighlightsLayer) MaxPriority() int {
 	return len(*h) - 1
 }

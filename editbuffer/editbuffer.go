@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ge-editor/editorleaf/editbuffer/rows"
 	"github.com/ge-editor/gecore/lang"
 	"github.com/ge-editor/utils"
 )
@@ -34,13 +33,16 @@ type EditBuffer struct {
 
 	langMode *lang.Mode
 
-	*rows.Rows
+	rows     *Rows_
 	encoding string
 	NewlineType
 
 	flags // readonly
 
 	UndoAction *UndoStack
+
+	// treesitter
+	changeNotifier // buffer change notifications (see change.go)
 }
 
 // Call New() or Load() after invoking this function
@@ -60,7 +62,7 @@ func NewFile(rawPath string) *EditBuffer {
 
 		langMode: langMode,
 
-		Rows:        nil,
+		rows:        nil,
 		encoding:    "UTF-8",
 		NewlineType: NewlineTypeLF,
 
@@ -109,6 +111,16 @@ func (eb *EditBuffer) init() {
 	eb.ext = filepath.Ext(eb.path)
 }
 
+func NewEditBuffer(r *Rows_) *EditBuffer {
+	return &EditBuffer{
+		rows: r,
+	}
+}
+
+func (eb *EditBuffer) Rows() *Rows_ {
+	return eb.rows
+}
+
 func (eb *EditBuffer) ChangePath(path string) {
 	eb.rawPath = path
 	eb.init()
@@ -116,8 +128,8 @@ func (eb *EditBuffer) ChangePath(path string) {
 
 // New file
 func (eb *EditBuffer) New() error {
-	eb.Rows = rows.New()
-	eb.Rows.AddRow([]byte{})
+	eb.rows = NewRowsType()
+	eb.rows.AddRow([]byte{})
 
 	eb.NewlineType = NewlineTypeLF
 	return nil
@@ -133,7 +145,7 @@ func (eb *EditBuffer) Load() error {
 
 	reader := bufio.NewReader(fp)
 
-	eb.Rows = rows.New()
+	eb.rows = NewRowsType()
 	var countLF, countCRLF, countCR int
 	var finalRowNewlineType NewlineType
 	for {
@@ -152,7 +164,7 @@ func (eb *EditBuffer) Load() error {
 		// if len(line) > 0 {
 		b := make([]byte, len(line), len(line)+16)
 		copy(b, line)
-		eb.AddRow(b)
+		eb.rows.AddRow(b)
 		// }
 
 		if err == io.EOF {
@@ -164,8 +176,8 @@ func (eb *EditBuffer) Load() error {
 		}
 	}
 
-	if eb.Length() == 0 || finalRowNewlineType != NewlineTypeNone {
-		eb.AddRow([]byte{})
+	if eb.rows.Length() == 0 || finalRowNewlineType != NewlineTypeNone {
+		eb.rows.AddRow([]byte{})
 	} /*  else {
 		linesIndex := eb.RowsLength() - 1
 		lineIndex := eb.Rows().Row(linesIndex).Length()
@@ -248,7 +260,7 @@ func (eb *EditBuffer) GetLangMode() *lang.Mode {
 // in the resulting byte slice, followed by the total byte length.
 func (eb *EditBuffer) Bytes() ([]byte, []int, error) {
 	return utils.JoinRows(
-		eb.BytesArray(),
+		eb.rows.BytesArray(),
 		NewlineTypeLF.Bytes(),
 		true,
 	)
@@ -275,7 +287,7 @@ func (eb *EditBuffer) Save() (Result, error) {
 		}
 	}
 
-	sourceBytes, _, err := utils.JoinRows(eb.BytesArray(), eb.GetNewLine().Bytes(), true)
+	sourceBytes, _, err := utils.JoinRows(eb.rows.BytesArray(), eb.GetNewLine().Bytes(), true)
 	if err != nil {
 		return result, err
 	}

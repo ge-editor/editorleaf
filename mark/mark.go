@@ -2,10 +2,9 @@ package mark
 
 import (
 	"github.com/ge-editor/editorleaf/editbuffer"
-	"github.com/ge-editor/editorleaf/editbuffer/rows"
 )
 
-func NewMark(ff *editbuffer.EditBuffer, current rows.RowsPos, content string) *Mark {
+func NewMark(ff *editbuffer.EditBuffer, current editbuffer.RowsPos, content string) *Mark {
 	return &Mark{
 		EditBuffer: ff,
 		RowsPos:    current,
@@ -15,7 +14,7 @@ func NewMark(ff *editbuffer.EditBuffer, current rows.RowsPos, content string) *M
 
 type Mark struct {
 	EditBuffer *editbuffer.EditBuffer
-	rows.RowsPos
+	editbuffer.RowsPos
 	Label string
 }
 
@@ -41,7 +40,7 @@ func (m *Mark) Equals(a *Mark) bool {
 // AdjustForInsertion updates the mark position after text insertion.
 // insertStart: insertion start position
 // insertEnd: insertion end position after insertion
-func (m *Mark) AdjustForInsertion(insertStart, insertEnd rows.RowsPos) {
+func (m *Mark) AdjustForInsertion(insertStart, insertEnd editbuffer.RowsPos) {
 	// If the mark is located before the insertion row,
 	// its position is unaffected.
 	if m == nil || m.RowIndex < insertStart.RowIndex {
@@ -79,7 +78,7 @@ func (m *Mark) AdjustForInsertion(insertStart, insertEnd rows.RowsPos) {
 // AdjustForDeletion updates the mark position after text deletion.
 // deleteStart: deletion start position
 // deleteEnd: deletion end position
-func (m *Mark) AdjustForDeletion(deleteStart, deleteEnd rows.RowsPos) {
+func (m *Mark) AdjustForDeletion(deleteStart, deleteEnd editbuffer.RowsPos) {
 	// If the mark is before the deletion start row,
 	// its position is unaffected.
 	if m == nil || m.RowIndex < deleteStart.RowIndex {

@@ -2,8 +2,7 @@ package highlight
 
 import (
 	"github.com/gdamore/tcell/v3"
-
-	"github.com/ge-editor/editorleaf/editbuffer/rows"
+	"github.com/ge-editor/editorleaf/editbuffer"
 )
 
 /*
@@ -25,12 +24,17 @@ const (
 )
 
 type Span struct {
-	Start         rows.RowsPos
-	End           rows.RowsPos
+	Start         editbuffer.RowsPos
+	End           editbuffer.RowsPos
 	Color         tcell.Style
 	ColorIfActive tcell.Style // For example, when the cursor is over a span
 	Priority      int
 }
+
+// GetSpan implements SpanTemplate. It lets a *Span be used directly as a
+// SpanTemplate when the caller has no extra per-match data to keep
+// (unlike e.g. search, which keeps Matches [][]string alongside its spans).
+func (s *Span) GetSpan() *Span { return s }
 
 // 例えば
 // SpanTemplate interface を実装した Search struct の場合は

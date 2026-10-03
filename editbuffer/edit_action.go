@@ -3,7 +3,6 @@ package editbuffer
 import (
 	"fmt"
 
-	"github.com/ge-editor/editorleaf/editbuffer/rows"
 	"github.com/ge-editor/gelog"
 )
 
@@ -66,9 +65,9 @@ const (
 
 type EditAction struct {
 	Class  ActionClass
-	Before rows.RowsPos
-	After  rows.RowsPos
-	Data   rows.Rows
+	Before RowsPos
+	After  RowsPos
+	Data   Rows_
 	NoJoin bool
 }
 
@@ -78,7 +77,7 @@ func (a *EditAction) Clone() *EditAction {
 	}
 
 	cloned := *a
-	cloned.Data = a.Data.Clone()
+	cloned.Data = a.Data.CloneRows()
 
 	return &cloned
 }
@@ -129,12 +128,12 @@ func (u *UndoStack) PushAction(a *EditAction, beAbleToJoin bool) {
 		"PushAction",
 		"after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex),
 		"before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex),
-		"data", a.Data.String([]byte{'\n'}),
+		"data", a.Data.JoinString([]byte{'\n'}),
 	)
 
 	// Make a complete copy before storing the action in the undo stack.
 	actionCopy := *a
-	actionCopy.Data = a.Data.Clone()
+	actionCopy.Data = a.Data.CloneRows()
 
 	// If we are not at the end of the stack, the redo history must be
 	// discarded before adding a new action.

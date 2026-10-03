@@ -9,7 +9,7 @@ import (
 
 	"github.com/gdamore/tcell/v3"
 
-	"github.com/ge-editor/editorleaf/editbuffer/rows"
+	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/editorleaf/highlight"
 	"github.com/ge-editor/editorleaf/search"
 	"github.com/ge-editor/gecore"
@@ -162,7 +162,7 @@ func (e *Editorleaf) SearchRegexp(searchTerm string, caseSensitive bool) {
 		hls := e.meta.HighlightLayer.Highlights(highlight.LayerSearch)
 		hls.Clear()
 
-		rows := e.editBuffer.Rows
+		rows := e.editBuffer.Rows()
 		re, err := regexp.Compile(searchTerm)
 		if err != nil {
 			return
@@ -213,7 +213,7 @@ func (e *Editorleaf) searchText(text string, caseSensitive bool) {
 		textBytes := []byte(text)
 		textBytesLen := len(textBytes)
 
-		lines := e.editBuffer.Rows
+		lines := e.editBuffer.Rows()
 		for i := 0; i < lines.Length(); i++ {
 			line := (*lines)[i]
 			index := 0
@@ -268,8 +268,8 @@ func (e *Editorleaf) ReplaceCurrentSearchString(str string) {
 	if !ok {
 		return
 	}
-	e.killRegion(rows.RowsPos{RowIndex: foundPosition.Start.RowIndex, ColIndex: foundPosition.Start.ColIndex},
-		rows.RowsPos{RowIndex: foundPosition.Start.RowIndex, ColIndex: foundPosition.End.ColIndex})
+	e.killRegion(editbuffer.RowsPos{RowIndex: foundPosition.Start.RowIndex, ColIndex: foundPosition.Start.ColIndex},
+		editbuffer.RowsPos{RowIndex: foundPosition.Start.RowIndex, ColIndex: foundPosition.End.ColIndex})
 	e.InsertString(str)
 
 	// Correct the changed Results within the same line where replacement is made
@@ -303,11 +303,11 @@ func (e *Editorleaf) ReplaceCurrentSearchString(str string) {
 func NewFoundPosition(startRowIndex, startColIndex, stopRowIndex, stopColIndex int, color, ColorOnCursor tcell.Style) *search.SearchResult {
 	return &search.SearchResult{
 		Span: &highlight.Span{
-			Start: rows.RowsPos{
+			Start: editbuffer.RowsPos{
 				RowIndex: startRowIndex,
 				ColIndex: startColIndex,
 			},
-			End: rows.RowsPos{
+			End: editbuffer.RowsPos{
 				RowIndex: stopRowIndex,
 				ColIndex: stopColIndex,
 			},

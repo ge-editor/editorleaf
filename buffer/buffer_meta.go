@@ -1,7 +1,7 @@
 package buffer
 
 import (
-	"github.com/ge-editor/editorleaf/editbuffer/rows"
+	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/editorleaf/highlight"
 	"github.com/ge-editor/editorleaf/search"
 	"github.com/ge-editor/gecore/screen"
@@ -9,7 +9,7 @@ import (
 
 func newMeta() *Meta {
 	return &Meta{
-		RowsPos: rows.RowsPos{
+		RowsPos: editbuffer.RowsPos{
 			RowIndex: 0,
 			ColIndex: 0,
 		},
@@ -47,7 +47,7 @@ func newMeta() *Meta {
 }
 
 type Meta struct {
-	RowsPos rows.RowsPos
+	RowsPos editbuffer.RowsPos
 
 	ScreenPos     screen.Cursor
 	PrevScreenPos screen.Cursor // Horizontal position of the cursor when vertically moving the cursor

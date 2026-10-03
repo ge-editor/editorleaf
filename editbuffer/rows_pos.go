@@ -1,4 +1,4 @@
-package rows
+package editbuffer
 
 type RowsPos struct {
 	RowIndex int

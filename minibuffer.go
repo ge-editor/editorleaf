@@ -22,15 +22,10 @@ func newMinibuffer() *Editorleaf {
 		mode:       ModeEditor,
 		locale:     locale.New(),
 
-		// styleResolver: styleresolver.New(),
-		// searchResolver:      &search.SearchResolver{},
-		// specialCharResolver: &styleresolver.SpecialCharResolver{},
 		highlightLayer: &highlight.HighlightsLayer{},
 	}
 	e.bsArray = NewBoundariesArray(e)
-
-	// e.styleResolver.Add(&search.SearchResolver{})
-	// e.styleResolver.Add(&styleresolver.SpecialCharResolver{})
+	e.InitTreesitter()
 
 	return e
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/atotto/clipboard"
 
 	"github.com/ge-editor/editorleaf/editbuffer"
-	"github.com/ge-editor/editorleaf/editbuffer/rows"
 	"github.com/ge-editor/editorleaf/mark"
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/define"
@@ -38,11 +37,12 @@ func (e *Editorleaf) OpenFile(path string) (editbuffer.Result, error) {
 	e.editBuffer = ff
 	e.meta = meta
 	e.bsArray.ClearAll()
+	e.InitTreesitter() // re-attach syntax highlighting (if any) for the new buffer's lang.Mode
 	return result, err
 }
 
 func (e *Editorleaf) adjustFormattedCursorPosition() {
-	rows := e.editBuffer.Rows
+	rows := e.editBuffer.Rows()
 	if e.meta.RowsPos.RowIndex >= rows.Length() {
 		e.meta.RowsPos.RowIndex = rows.Length() - 1
 	}
@@ -85,11 +85,11 @@ func (e *Editorleaf) SaveFile() {
 			ed.bsArray.ClearAll()
 
 			// May need adjust cursor position if formatted content
-			rowLength := ed.editBuffer.Rows.Length()
+			rowLength := ed.editBuffer.Rows().Length()
 			if ed.meta.RowsPos.RowIndex >= rowLength {
 				ed.meta.RowsPos.RowIndex = rowLength - 1
 			}
-			line := (*ed.editBuffer.Rows)[ed.meta.RowsPos.RowIndex]
+			line := (*ed.editBuffer.Rows())[ed.meta.RowsPos.RowIndex]
 			colLength := len(line)
 			if ed.meta.RowsPos.ColIndex >= colLength {
 				// cursor on newline or EOF
@@ -124,7 +124,7 @@ func (e *Editorleaf) GetPath() string {
 func (e *Editorleaf) MoveCursorForward() {
 	x, y := e.meta.ScreenPos.Col, e.meta.ScreenPos.Row
 
-	lines := e.editBuffer.Rows
+	lines := e.editBuffer.Rows()
 	line := lines.Row(e.meta.RowsPos.RowIndex)
 	if line.IsColIndexAtRowEnd(e.meta.RowsPos.ColIndex) {
 		if lines.IsRowIndexLastRow(e.meta.RowsPos.RowIndex) {
@@ -178,7 +178,7 @@ func (e *Editorleaf) MoveCursorBackward() {
 		e.meta.RowsPos.ColIndex = prevBs.StopLogicalRowByteIndex - 1
 	} else {
 		before := e.bsArray.GetIndexOfLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex)
-		ch, _, colIndex, ok := e.editBuffer.Rows.Row(e.meta.RowsPos.RowIndex).DecodePrevRune(e.meta.RowsPos.ColIndex)
+		ch, _, colIndex, ok := e.editBuffer.Rows().Row(e.meta.RowsPos.RowIndex).DecodePrevRune(e.meta.RowsPos.ColIndex)
 		if !ok {
 			panic("2")
 		}
@@ -205,7 +205,7 @@ func (e *Editorleaf) MoveCursorBackward() {
 func (e *Editorleaf) MoveCursorNextWord() {
 	x, y := e.meta.ScreenPos.Col, e.meta.ScreenPos.Row
 
-	lines := e.editBuffer.Rows
+	lines := e.editBuffer.Rows()
 	line := lines.Row(e.meta.RowsPos.RowIndex)
 	if line.IsColIndexAtRowEnd(e.meta.RowsPos.ColIndex) {
 		if lines.IsRowIndexLastRow(e.meta.RowsPos.RowIndex) {
@@ -268,7 +268,7 @@ func (e *Editorleaf) MoveCursorPreviousWord() {
 		e.meta.RowsPos.RowIndex--
 
 		lastBs := e.bsArray.LastBoundary(e.meta.RowsPos.RowIndex)
-		ch, _, colIndex, _ := e.editBuffer.Rows.Row(e.meta.RowsPos.RowIndex).DecodeEndRune()
+		ch, _, colIndex, _ := e.editBuffer.Rows().Row(e.meta.RowsPos.RowIndex).DecodeEndRune()
 		w := e.locale.RuneWidth(ch)
 
 		// Move to the last character of the previous logical row.
@@ -284,7 +284,7 @@ func (e *Editorleaf) MoveCursorPreviousWord() {
 				e.meta.RowsPos.ColIndex,
 			)
 
-			ch, _, colIndex, ok := e.editBuffer.Rows.Row(
+			ch, _, colIndex, ok := e.editBuffer.Rows().Row(
 				e.meta.RowsPos.RowIndex,
 			).DecodePrevRune(e.meta.RowsPos.ColIndex)
 			if !ok {
@@ -362,7 +362,7 @@ func (e *Editorleaf) MoveCursorNextLine() {
 	indexOfLogicalRow := 0
 
 	if e.bsArray.OnEndOfLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex) { // last logical line
-		if e.editBuffer.Rows.IsRowIndexLastRow(e.meta.RowsPos.RowIndex) {
+		if e.editBuffer.Rows().IsRowIndexLastRow(e.meta.RowsPos.RowIndex) {
 			gecore.Echo.AddText("End of buffer")
 			return
 		}
@@ -412,7 +412,7 @@ func (e *Editorleaf) MoveCursorEndOfLine() {
 	// What index number in logic row?
 	indexOfLogicalRow := e.bsArray.GetIndexOfLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex)
 
-	colLength := e.editBuffer.Rows.Row(e.meta.RowsPos.RowIndex).Length()
+	colLength := e.editBuffer.Rows().Row(e.meta.RowsPos.RowIndex).Length()
 	e.meta.RowsPos.ColIndex = colLength
 
 	// cursor display position y
@@ -433,7 +433,7 @@ func (e *Editorleaf) MoveCursorBeginningOfLine() {
 	}
 
 	nowIndexOfLogicalRow := e.bsArray.GetIndexOfLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex)
-	rows := e.editBuffer.Rows
+	rows := e.editBuffer.Rows()
 	indentedIndex := 0
 	indentedWidth := 0
 	for indentedIndex < rows.Row(e.meta.RowsPos.RowIndex).Length() {
@@ -520,7 +520,7 @@ func (e *Editorleaf) MoveCursorBeginningOfFile() {
 }
 
 func (e *Editorleaf) MoveCursorEndOfFile() {
-	e.meta.RowsPos.RowIndex = e.editBuffer.Rows.Length() - 1
+	e.meta.RowsPos.RowIndex = e.editBuffer.Rows().Length() - 1
 	lastBs := e.bsArray.LastBoundary(e.meta.RowsPos.RowIndex)
 	e.meta.RowsPos.ColIndex = lastBs.StopLogicalRowByteIndex - 1 // left of the LF or EOF
 	e.meta.ScreenPos.Col = lastBs.LogicalRowWidth - 1            // left of the LF or EOF
@@ -551,7 +551,7 @@ func (e *Editorleaf) MoveViewHalfForward() {
 		// Move to the next physical row.
 		n -= remaining + 1
 
-		if rowIndex == e.editBuffer.Rows.Length()-1 {
+		if rowIndex == e.editBuffer.Rows().Length()-1 {
 			logicalRowIndex = rowLength - 1
 		} else {
 			rowIndex++
@@ -566,7 +566,7 @@ func (e *Editorleaf) MoveViewHalfForward() {
 
 				n -= rowLength
 
-				if rowIndex == e.editBuffer.Rows.Length()-1 {
+				if rowIndex == e.editBuffer.Rows().Length()-1 {
 					logicalRowIndex = rowLength - 1
 					break
 				}
@@ -640,7 +640,7 @@ func (e *Editorleaf) MoveViewHalfBackward() {
 }
 
 func (e *Editorleaf) MoveCursorGoToLine(lineNumber int) {
-	if lineNumber < 1 || lineNumber > e.editBuffer.Rows.Length() {
+	if lineNumber < 1 || lineNumber > e.editBuffer.Rows().Length() {
 		return
 	}
 	e.meta.RowsPos.RowIndex = lineNumber - 1
@@ -683,11 +683,11 @@ func (e *Editorleaf) DeleteRuneBackward() {
 			return
 		}
 		// join to prev row
-		_, size, colIndex, _ := e.editBuffer.Rows.Row(e.meta.RowsPos.RowIndex - 1).DecodeEndRune()
+		_, size, colIndex, _ := e.editBuffer.Rows().Row(e.meta.RowsPos.RowIndex - 1).DecodeEndRune()
 		start.RowIndex--
 		start.ColIndex = colIndex + size
 	} else {
-		_, _, prevRuneColIndex, _ := e.editBuffer.Rows.Row(e.meta.RowsPos.RowIndex).DecodePrevRune(e.meta.RowsPos.ColIndex)
+		_, _, prevRuneColIndex, _ := e.editBuffer.Rows().Row(e.meta.RowsPos.RowIndex).DecodePrevRune(e.meta.RowsPos.ColIndex)
 		start.ColIndex = prevRuneColIndex
 	}
 
@@ -727,11 +727,11 @@ func (e *Editorleaf) DeleteRune() {
 	start := e.meta.RowsPos
 	stop := e.meta.RowsPos
 
-	if e.editBuffer.Rows.Row(e.meta.RowsPos.RowIndex).IsColIndexAtRowEnd(e.meta.RowsPos.ColIndex) {
+	if e.editBuffer.Rows().Row(e.meta.RowsPos.RowIndex).IsColIndexAtRowEnd(e.meta.RowsPos.ColIndex) {
 		stop.RowIndex++
 		stop.ColIndex = 0
 	} else {
-		_, size, _ := e.editBuffer.Rows.Row(e.meta.RowsPos.RowIndex).DecodeRune(e.meta.RowsPos.ColIndex)
+		_, size, _ := e.editBuffer.Rows().Row(e.meta.RowsPos.RowIndex).DecodeRune(e.meta.RowsPos.ColIndex)
 		stop.ColIndex += size
 	}
 
@@ -759,7 +759,7 @@ func (e *Editorleaf) DeleteRune() {
 }
 
 func (e *Editorleaf) Autoindent() {
-	line := e.editBuffer.Rows.Row(e.meta.RowsPos.RowIndex)
+	line := e.editBuffer.Rows().Row(e.meta.RowsPos.RowIndex)
 	indent := make([]byte, 0, line.Length())
 	indent = append(indent, '\n')
 	for i := 0; i < line.Length(); {
@@ -786,7 +786,7 @@ func (e Editorleaf) BackwardKillLine() {
 		return
 	}
 
-	start := rows.RowsPos{
+	start := editbuffer.RowsPos{
 		RowIndex: e.meta.RowsPos.RowIndex,
 		ColIndex: 0,
 	}
@@ -827,7 +827,7 @@ func (e Editorleaf) BackwardKillLine() {
 // EOL でない場合は、カーソルから末尾までの現在の行の内容を削除します。
 // それ以外の場合は、「delete」のように動作します。
 func (e *Editorleaf) KillLine() {
-	lines := e.editBuffer.Rows
+	lines := e.editBuffer.Rows()
 	line := lines.Row(e.meta.RowsPos.RowIndex)
 	if line.IsColIndexAtRowEnd(e.meta.RowsPos.ColIndex) {
 		if lines.IsRowIndexLastRow(e.meta.RowsPos.RowIndex) {
@@ -973,8 +973,8 @@ func (e *Editorleaf) FilterByCharacters(chars string) []*mark.Mark {
 // --------------------
 
 // Copy region to kill buffer
-func (e *Editorleaf) copyRegion(a, b rows.RowsPos) error {
-	s := e.editBuffer.GetRegion(a, b)
+func (e *Editorleaf) copyRegion(a, b editbuffer.RowsPos) error {
+	s := e.editBuffer.Rows().GetRegion(a, b)
 	if s == nil {
 		return nil
 	}
@@ -1016,7 +1016,7 @@ func (e *Editorleaf) CopyRegion() {
 
 // Delete start to stop bytes and push the bytes to undo-stack and kill-buffer
 // 開始から終了までのバイトを削除し、そのバイトを undo スタックと kill バッファにプッシュする
-func (e *Editorleaf) killRegion(start, stop rows.RowsPos) {
+func (e *Editorleaf) killRegion(start, stop editbuffer.RowsPos) {
 	removed := e.editBuffer.RemoveRegion(start, stop)
 	if removed == nil {
 		return
@@ -1102,7 +1102,7 @@ func (e *Editorleaf) Undo() {
 
 		switch a.Class {
 		case editbuffer.INSERT:
-			gelog.Debug("Undo INSERT", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.String([]byte{'\n'}))
+			gelog.Debug("Undo INSERT", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
 
 			e.editBuffer.RemoveRegion(a.Before, a.After)
 			e.syncCursorAndBufferForEdit(
@@ -1114,36 +1114,18 @@ func (e *Editorleaf) Undo() {
 
 			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
 			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
-			/*
-				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
-					ed, ok := l.(*Editorleaf)
-					if !ok {
-						return
-					}
-
-					var start int
-					count := a.After.RowIndex - a.Before.RowIndex
-					if a.Before.ColIndex == 0 && a.After.ColIndex == 0 { // 行単位
-						start = a.Before.RowIndex
-					} else {
-						ed.bsArray.ClearRow(a.Before.RowIndex)
-						start = a.Before.RowIndex + 1
-					}
-					if count > 0 {
-						ed.bsArray.Delete(start, count)
-					}
-				})
-			*/
 			e.rebuildBufferState(a.Before, a.After, editbuffer.DELETE)
 
 		case editbuffer.DELETE:
-			gelog.Debug("Undo DELETE", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.String([]byte{'\n'}))
+			gelog.Debug("Undo DELETE", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
 
-			e.editBuffer.Rows.InsertRegion(
+			// treesitter
+			e.editBuffer.InsertRegion(
 				a.Before.RowIndex,
 				a.Before.ColIndex,
 				a.Data,
 			)
+
 			e.syncCursorAndBufferForEdit(
 				INSERT,
 				a.Before,
@@ -1152,32 +1134,12 @@ func (e *Editorleaf) Undo() {
 
 			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
 			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
-			/*
-				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
-					ed, ok := l.(*Editorleaf)
-					if !ok {
-						return
-					}
-
-					var start int
-					count := a.After.RowIndex - a.Before.RowIndex
-					if a.Before.ColIndex == 0 && a.After.ColIndex == 0 { // 行単位
-						start = a.Before.RowIndex
-					} else {
-						ed.bsArray.ClearRow(a.Before.RowIndex)
-						start = a.Before.RowIndex + 1
-					}
-					if count > 0 {
-						ed.bsArray.Insert(start, count)
-					}
-				})
-			*/
 			e.rebuildBufferState(a.Before, a.After, editbuffer.INSERT)
 
 			e.meta.RowsPos = a.Before
 
 		case editbuffer.DELETE_BACKWARD:
-			gelog.Debug("Undo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.String([]byte{'\n'}))
+			gelog.Debug("Undo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
 
 			e.insertRows(a.Data, false)
 			e.syncCursorAndBufferForEdit(
@@ -1188,26 +1150,6 @@ func (e *Editorleaf) Undo() {
 
 			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
 			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
-			/*
-				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
-					ed, ok := l.(*Editorleaf)
-					if !ok {
-						return
-					}
-
-					var start int
-					count := a.Before.RowIndex - a.After.RowIndex
-					if a.Before.ColIndex == 0 && a.After.ColIndex == 0 { // 行単位
-						start = a.After.RowIndex
-					} else {
-						ed.bsArray.ClearRow(a.After.RowIndex)
-						start = a.After.RowIndex + 1
-					}
-					if count > 0 {
-						ed.bsArray.Insert(start, count)
-					}
-				})
-			*/
 			e.rebuildBufferState(a.After, a.Before, editbuffer.INSERT)
 
 			e.meta.RowsPos = a.After
@@ -1217,8 +1159,6 @@ func (e *Editorleaf) Undo() {
 		}
 
 	}
-
-	// e.rebuildBufferState()
 
 	gecore.Echo.AddText("Undo!")
 }
@@ -1239,7 +1179,7 @@ func (e *Editorleaf) Redo() {
 	for _, a := range actions {
 		switch a.Class {
 		case editbuffer.INSERT:
-			gelog.Debug("Redo INSERT", "a", a.Data.String([]byte{'\n'}))
+			gelog.Debug("Redo INSERT", "a", a.Data.JoinString([]byte{'\n'}))
 			e.meta.RowsPos = a.Before
 			e.insertRows(a.Data, false)
 			// Keep editor state synchronized with the redo operation.
@@ -1251,32 +1191,12 @@ func (e *Editorleaf) Redo() {
 
 			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
 			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
-			/*
-				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
-					ed, ok := l.(*Editorleaf)
-					if !ok {
-						return
-					}
-
-					var start int
-					count := a.After.RowIndex - a.Before.RowIndex
-					if a.Before.ColIndex == 0 && a.After.ColIndex == 0 { // 行単位
-						start = a.Before.RowIndex
-					} else {
-						ed.bsArray.ClearRow(a.Before.RowIndex)
-						start = a.Before.RowIndex + 1
-					}
-					if count > 0 {
-						ed.bsArray.Insert(start, count)
-					}
-				})
-			*/
 			e.rebuildBufferState(a.Before, a.After, editbuffer.INSERT)
 
 			e.meta.RowsPos = a.After
 
 		case editbuffer.DELETE_BACKWARD:
-			gelog.Debug("Redo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.String([]byte{'\n'}))
+			gelog.Debug("Redo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
 
 			e.meta.RowsPos = a.Before
 			e.editBuffer.RemoveRegion(
@@ -1291,26 +1211,6 @@ func (e *Editorleaf) Redo() {
 
 			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
 			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
-			/*
-				tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
-					ed, ok := l.(*Editorleaf)
-					if !ok {
-						return
-					}
-
-					var start int
-					count := a.After.RowIndex - a.Before.RowIndex
-					if a.Before.ColIndex == 0 && a.After.ColIndex == 0 { // 行単位
-						start = a.Before.RowIndex
-					} else {
-						ed.bsArray.ClearRow(a.Before.RowIndex)
-						start = a.Before.RowIndex + 1
-					}
-					if count > 0 {
-						ed.bsArray.Delete(start, count)
-					}
-				})
-			*/
 			e.rebuildBufferState(a.Before, a.After, editbuffer.DELETE)
 
 			e.meta.RowsPos = a.Before
@@ -1332,26 +1232,6 @@ func (e *Editorleaf) Redo() {
 
 			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
 			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
-			/*
-						tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
-							ed, ok := l.(*Editorleaf)
-							if !ok {
-					return
-				}
-
-							var start int
-							count := cursor.RowIndex - a.Before.RowIndex
-							if a.Before.ColIndex == 0 && cursor.ColIndex == 0 { // 行単位
-								start = a.Before.RowIndex
-							} else {
-								ed.bsArray.ClearRow(a.Before.RowIndex)
-								start = a.Before.RowIndex + 1
-							}
-							if count > 0 {
-								ed.bsArray.Delete(start, count)
-							}
-						})
-			*/
 			e.rebuildBufferState(a.Before, cursor, editbuffer.DELETE)
 
 			e.meta.RowsPos = a.After
@@ -1361,11 +1241,9 @@ func (e *Editorleaf) Redo() {
 		}
 
 	}
-
-	// e.rebuildBufferState()
 }
 
-func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) rows.RowsPos {
+func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) editbuffer.RowsPos {
 	cursor := a.Before
 
 	if len(a.Data) == 0 {
@@ -1382,7 +1260,7 @@ func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) rows.RowsPos {
 
 // Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
 // Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
-func (e *Editorleaf) rebuildBufferState(before, after rows.RowsPos, class editbuffer.ActionClass) {
+func (e *Editorleaf) rebuildBufferState(before, after editbuffer.RowsPos, class editbuffer.ActionClass) {
 	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
 		ed, ok := l.(*Editorleaf)
 		if !ok {
@@ -1414,11 +1292,11 @@ func (e *Editorleaf) rebuildBufferState(before, after rows.RowsPos, class editbu
 // Other
 // --------------------
 
-func (e *Editorleaf) SetRowsPos(c rows.RowsPos) {
+func (e *Editorleaf) SetRowsPos(c editbuffer.RowsPos) {
 	e.meta.RowsPos = c
 }
 
-func (e Editorleaf) SetRows(r rows.Rows) {
+func (e Editorleaf) SetRows(r editbuffer.Rows_) {
 	e.editBuffer.SetRows(r)
 
 	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
@@ -1445,7 +1323,7 @@ func (e Editorleaf) SetRows(r [][]byte) {
 */
 
 func (e *Editorleaf) RowsLength() int {
-	return e.editBuffer.Rows.Length()
+	return e.editBuffer.Rows().Length()
 }
 
 // 編集中のテキストの []byte を返す
@@ -1455,7 +1333,7 @@ func (e *Editorleaf) GetBytes() ([]byte, []int, error) {
 }
 
 func (e Editorleaf) IsEndOfLine() bool {
-	line := (*e.editBuffer.Rows)[e.meta.RowsPos.RowIndex]
+	line := (*e.editBuffer.Rows())[e.meta.RowsPos.RowIndex]
 	return len(line)-1 == e.meta.RowsPos.ColIndex
 }
 
@@ -1478,10 +1356,10 @@ func (e *Editorleaf) Recenter() {
 // Utilities
 // --------------------
 
-func SplitRows(data []byte) (rows.Rows, error) {
+func SplitRows(data []byte) (editbuffer.Rows_, error) {
 	reader := bufio.NewReader(bytes.NewReader(data))
 
-	rows := make([]rows.Row, 0)
+	rows := make([]editbuffer.Row_, 0)
 
 	for {
 		line, _, err := editbuffer.ReadLine(reader)
@@ -1509,10 +1387,11 @@ func SplitRows(data []byte) (rows.Rows, error) {
 	return rows, nil
 }
 
-func (e *Editorleaf) insertRows(data rows.Rows, enableUndo bool) {
+func (e *Editorleaf) insertRows(data editbuffer.Rows_, enableUndo bool) {
 	beforeCursor := e.meta.RowsPos
 
-	e.editBuffer.Rows.InsertRegion(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex, data)
+	// treesitter
+	e.editBuffer.InsertRegion(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex, data)
 
 	// Current cursor
 	e.meta.RowsPos.RowIndex += data.Length() - 1
@@ -1553,7 +1432,7 @@ func (e *Editorleaf) insertRows(data rows.Rows, enableUndo bool) {
 }
 
 func (e *Editorleaf) insertBytesArray(data [][]byte, enableUndo bool) {
-	r := make(rows.Rows, len(data))
+	r := make(editbuffer.Rows_, len(data))
 	for i := 0; i < len(data); i++ {
 		r[i] = data[i]
 	}
@@ -1586,15 +1465,15 @@ func (e *Editorleaf) CharInfoOnCursor() (rune, string) {
 	isEOF := false
 	var ch rune
 	var str string
-	if e.editBuffer.Rows.Row(e.meta.RowsPos.RowIndex).IsColIndexAtRowEnd(e.meta.RowsPos.ColIndex) {
-		if e.editBuffer.Rows.IsRowIndexLastRow(e.meta.RowsPos.RowIndex) {
+	if e.editBuffer.Rows().Row(e.meta.RowsPos.RowIndex).IsColIndexAtRowEnd(e.meta.RowsPos.ColIndex) {
+		if e.editBuffer.Rows().IsRowIndexLastRow(e.meta.RowsPos.RowIndex) {
 			isEOF = true
 			ch = define.EOF
 		} else {
 			ch = '\n'
 		}
 	} else {
-		ch, _, _ = (*e).editBuffer.Rows.Row(e.meta.RowsPos.RowIndex).DecodeRune(e.meta.RowsPos.ColIndex)
+		ch, _, _ = (*e).editBuffer.Rows().Row(e.meta.RowsPos.RowIndex).DecodeRune(e.meta.RowsPos.ColIndex)
 	}
 	if isEOF {
 		str = "EOF"
@@ -1612,7 +1491,7 @@ func (e *Editorleaf) getColumnIndexClosestToCursorXPosition(rowIndex, indexOfLog
 	// Get the boundaries of the logical row within the physical row.
 	bo := e.bsArray.Boundary(rowIndex, indexOfLogicalRow)
 	// Get the line content for the specified rowIndex.
-	row := e.editBuffer.Row(rowIndex)
+	row := e.editBuffer.Rows().Row(rowIndex)
 	// Initialize colIndex to the start index of the logical row.
 	for colIndex = bo.StartLogicalRowByteIndex; ; {
 		// Decode the next rune starting from colIndex.
@@ -1631,7 +1510,7 @@ func (e *Editorleaf) getColumnIndexClosestToCursorXPosition(rowIndex, indexOfLog
 }
 
 // Return content widthout special charactor
-func (e *Editorleaf) getContentWidthoutSpecialCharactor(current rows.RowsPos, maxContentWidth int) (content string) {
+func (e *Editorleaf) getContentWidthoutSpecialCharactor(current editbuffer.RowsPos, maxContentWidth int) (content string) {
 	isSpecialChar := func(ch rune) bool {
 		return ch < 32 || ch == define.DEL || ch == '　' || ch == define.NO_BREAK_SPACE
 	}
@@ -1639,8 +1518,8 @@ func (e *Editorleaf) getContentWidthoutSpecialCharactor(current rows.RowsPos, ma
 	width := 0
 	skip := false
 	startCol := current.ColIndex
-	for y := current.RowIndex; y < e.editBuffer.Rows.Length(); y++ {
-		row := e.editBuffer.Rows.Row(y)
+	for y := current.RowIndex; y < e.editBuffer.Rows().Length(); y++ {
+		row := e.editBuffer.Rows().Row(y)
 		for x := startCol; x < len(*row); {
 			ch, size := utf8.DecodeRune((*row)[x:])
 			w := e.locale.RuneWidth(ch)

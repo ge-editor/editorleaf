@@ -1,6 +1,6 @@
 package highlight
 
-import "github.com/ge-editor/editorleaf/editbuffer/rows"
+import "github.com/ge-editor/editorleaf/editbuffer"
 
 func NewHighlights() *Highlights {
 	return &Highlights{
@@ -50,7 +50,7 @@ func (h *Highlights) Next() bool {
 
 // return SpanIndex
 func (h *Highlights) MatcheFirstRegenSpanIndex(
-	pos rows.RowsPos,
+	pos editbuffer.RowsPos,
 	startSpansIndex int,
 ) int {
 	for i := startSpansIndex; i < len(h.Spans); i++ {
@@ -65,7 +65,7 @@ func (h *Highlights) MatcheFirstRegenSpanIndex(
 	return -1 // not found
 }
 
-func PosInSpan(r rows.RowsPos, s *Span) bool {
+func PosInSpan(r editbuffer.RowsPos, s *Span) bool {
 	if r.RowIndex < s.Start.RowIndex ||
 		r.RowIndex > s.End.RowIndex {
 		return false

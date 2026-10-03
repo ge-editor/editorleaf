@@ -1,19 +1,19 @@
-package rows
+package editbuffer
 
 import (
 	"slices"
 	"unicode/utf8"
 )
 
-type Row []byte
+type Row_ []byte
 
 // Length returns the number of bytes in the row.
-func (r Row) Length() int {
+func (r Row_) Length() int {
 	return len(r)
 }
 
 // Bytes returns the underlying byte slice of the row.
-func (r Row) Bytes() []byte {
+func (r Row_) Bytes() []byte {
 	return r
 }
 
@@ -29,12 +29,12 @@ func (r Row) Bytes() []byte {
 
 // IsColIndexAtRowEnd reports whether colIndex is at the end of the row.
 // colIndex is a byte offset; len(r) is the row-end position.
-func (r Row) IsColIndexAtRowEnd(colIndex int) bool {
+func (r Row_) IsColIndexAtRowEnd(colIndex int) bool {
 	return colIndex == len(r)
 }
 
 // CopyBytes returns a copy of the specified byte range.
-func (r Row) CopyBytes(col1, col2 int) []byte {
+func (r Row_) CopyBytes(col1, col2 int) []byte {
 	if col1 < 0 || col2 < col1 || col2 > len(r) {
 		return nil
 	}
@@ -43,7 +43,7 @@ func (r Row) CopyBytes(col1, col2 int) []byte {
 }
 
 // CopyBytes returns a copy of the specified byte range.
-func (r Row) Copy(col1, col2 int) Row {
+func (r Row_) Copy(col1, col2 int) Row_ {
 	if col1 < 0 || col2 < col1 || col2 > len(r) {
 		return nil
 	}
@@ -52,28 +52,22 @@ func (r Row) Copy(col1, col2 int) Row {
 }
 
 // Copy returns a copy Row.
-func (r Row) Clone() Row {
+func (r Row_) Clone() Row_ {
 	return slices.Clone(r)
 }
 
 // Delete removes bytes in the range [col1:col2].
-func (r *Row) Delete(col1, col2 int) {
+func (r *Row_) Delete(col1, col2 int) {
 	*r = slices.Delete(*r, col1, col2)
 }
-
-/* func (r *row) Delete(col1, col2 int) row {
-	*r = slices.Delete(*r, col1, col2)
-	return *r
-}
-*/
 
 // Add appends bytes to the row.
-func (r *Row) Add(b []byte) {
+func (r *Row_) Add(b []byte) {
 	*r = append(*r, b...)
 }
 
 // DecodeRune decodes a rune at the specified byte position.
-func (r Row) DecodeRune(colIndex int) (ch rune, size int, ok bool) {
+func (r Row_) DecodeRune(colIndex int) (ch rune, size int, ok bool) {
 	if colIndex < 0 || colIndex >= len(r) {
 		return 0, 0, false
 	}
@@ -83,12 +77,12 @@ func (r Row) DecodeRune(colIndex int) (ch rune, size int, ok bool) {
 }
 
 // DecodeEndRune decodes the last rune in the row.
-func (r Row) DecodeEndRune() (ch rune, size, colIndex int, ok bool) {
+func (r Row_) DecodeEndRune() (ch rune, size, colIndex int, ok bool) {
 	return r.DecodePrevRune(len(r))
 }
 
 // DecodePrevRune decodes the rune immediately before colIndex.
-func (r Row) DecodePrevRune(colIndex int) (ch rune, size, prevColIndex int, ok bool) {
+func (r Row_) DecodePrevRune(colIndex int) (ch rune, size, prevColIndex int, ok bool) {
 	if colIndex <= 0 || colIndex > len(r) {
 		return 0, 0, 0, false
 	}

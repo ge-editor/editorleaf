@@ -10,7 +10,6 @@ import (
 
 	"github.com/ge-editor/editorleaf/buffer"
 	"github.com/ge-editor/editorleaf/editbuffer"
-	"github.com/ge-editor/editorleaf/editbuffer/rows"
 	"github.com/ge-editor/editorleaf/highlight"
 	"github.com/ge-editor/editorleaf/mark"
 	"github.com/ge-editor/gecore"
@@ -58,6 +57,7 @@ func newEditorLeaf() *Editorleaf {
 		highlightLayer: &highlight.HighlightsLayer{},
 	}
 	e.bsArray = NewBoundariesArray(e)
+	e.InitTreesitter()
 
 	return e
 }
@@ -91,6 +91,13 @@ type Editorleaf struct {
 	locale locale.Locale // Locale interface
 
 	highlightLayer *highlight.HighlightsLayer
+
+	// treesitter
+	// syntaxDetach stops this editor's syntax.Worker, if one was
+	// attached in InitTreesitter() because the buffer's lang.Mode has a
+	// registered syntax.Parser. nil otherwise. Set in Init, called and
+	// cleared in WillCloseTreesitter.
+	syntaxDetach func()
 }
 
 func (e *Editorleaf) SetKeyDispatcher(km *keychord.RootNode) {
@@ -201,6 +208,7 @@ func (e *Editorleaf) Kill(leaf tree.Leaf, isActive bool) tree.Leaf {
 	for _, e := range toReplace {
 		e.editBuffer = (*BufferSets)[bufferSetsIndexForReplace].EditBuffer
 		e.meta = (*BufferSets)[bufferSetsIndexForReplace].PopMeta()
+		e.InitTreesitter() // re-attach syntax highlighting (if any) for the replacement buffer
 	}
 
 	return leaf
@@ -250,7 +258,7 @@ const (
 )
 
 // syncEdits adjusts cursor positions and buffer boundaries based on the type of edit (insert or delete).
-func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end rows.RowsPos) {
+func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbuffer.RowsPos) {
 	// Ensure start is before end; swap if necessary.
 	if start.RowIndex > end.RowIndex || (start.RowIndex == end.RowIndex && start.ColIndex > end.ColIndex) {
 		start, end = end, start
@@ -597,6 +605,30 @@ func (e *Editorleaf) drawRightBar() {
 	}
 }
 
+// requestRedraw asks the main loop to repaint. It is called from a
+// syntax.Worker's own goroutine (never the UI goroutine), so it cannot
+// call draw logic directly; instead it posts a tcell event, the same way
+// any real key or resize event would, which wakes ge/main.go's mainLoop
+// and triggers its normal startDraw().
+//
+// The posted event carries no data (EventInterrupt is treated by
+// ge/main.go's event() as a no-op event whose only job is to fall
+// through to startDraw()). PostEvent's error is intentionally ignored:
+// on a full queue or a screen already tearing down at shutdown, a
+// dropped redraw request just means the next real event's draw shows the
+// up-to-date highlighting instead of this one.
+func requestRedraw() {
+	// _ = screen.Get().PostEvent(tcell.NewEventInterrupt(nil))
+	// overlay.OverlayManager().Draw()
+	// _ = screen.Get().PostEvent(tcell.NewEventInterrupt(nil))
+
+	// screen.Get().Show()
+	// main.draw() bool
+
+	// EventQ() から返されるチャネルに直接イベントを送信する
+	screen.Get().EventQ() <- &tcell.EventResize{}
+}
+
 // Draw the screen based on Editor.currentRowIndex, logical row position logicalCY, and cursor position Editor.Cy
 func (e *Editorleaf) drawEditorleaf() bool {
 
@@ -639,9 +671,9 @@ func (e *Editorleaf) drawEditorleaf() bool {
 	totalLogicalRowIfInHeight := 0
 	totalRowAboveCursor := -1
 	isAll := false
-	if e.meta.RowsPos.RowIndex <= Height || e.editBuffer.Length() <= Height {
+	if e.meta.RowsPos.RowIndex <= Height || e.editBuffer.Rows().Length() <= Height {
 		isAll = true
-		for rowIndex := 0; rowIndex < e.editBuffer.Length(); rowIndex++ {
+		for rowIndex := 0; rowIndex < e.editBuffer.Rows().Length(); rowIndex++ {
 			if rowIndex == e.meta.RowsPos.RowIndex {
 				totalRowAboveCursor = totalLogicalRowIfInHeight + Lcy
 			}
@@ -853,7 +885,7 @@ func digitsScreenWidth(n int) int {
 func (e *Editorleaf) detectHangingIndent(rowIndex int) (int, int, bool) {
 	indentWidth := 0
 
-	lines := e.editBuffer.Rows
+	lines := e.editBuffer.Rows()
 	rowBytes := lines.Row(rowIndex).Length()
 
 	colIndex := 0
@@ -891,7 +923,7 @@ func (e *Editorleaf) detectHangingIndent(rowIndex int) (int, int, bool) {
 }
 
 type vLines struct {
-	r *rows.Row
+	r *editbuffer.Row_
 
 	// RowLength returns the virtual byte length of a row.
 	//
@@ -955,7 +987,7 @@ func (e *Editorleaf) drawLineWithCompute(
 	startScreenY, rowIndex, cursorLogicalCY int,
 	isDraw bool,
 ) (int, bool) {
-	gelog.Debug("drawLineWithCompute")
+	// gelog.Debug("drawLineWithCompute")
 
 	stat := highlightPosStatus{}
 
@@ -969,10 +1001,10 @@ func (e *Editorleaf) drawLineWithCompute(
 
 	var breakpoint Boundary
 	lines := vLines{
-		r:          e.editBuffer.Row(rowIndex),
-		rowLength:  e.editBuffer.Row(rowIndex).Length() + 1, // + LF or EOF
-		rowsLength: e.editBuffer.Rows.Length(),
-		isFinalRow: rowIndex == e.editBuffer.Rows.Length()-1,
+		r:          e.editBuffer.Rows().Row(rowIndex),
+		rowLength:  e.editBuffer.Rows().Row(rowIndex).Length() + 1, // + LF or EOF
+		rowsLength: e.editBuffer.Rows().Length(),
+		isFinalRow: rowIndex == e.editBuffer.Rows().Length()-1,
 	}
 	rowBytes := lines.rowLength
 	totalCellWidthForTab := 0 // for compute tab stop
@@ -1044,7 +1076,7 @@ func (e *Editorleaf) drawLineWithCompute(
 
 		// Highlight Style
 		isNoSpanStyle := true
-		span, _, isOnCursor := e.FindHighlightSpan(rows.RowsPos{RowIndex: rowIndex, ColIndex: bytePosOfRow}, stat)
+		span, _, isOnCursor := e.FindHighlightSpan(editbuffer.RowsPos{RowIndex: rowIndex, ColIndex: bytePosOfRow}, stat)
 		if span != nil {
 			if isOnCursor {
 				currentCell.Style = span.ColorIfActive
@@ -1536,7 +1568,7 @@ func (e *Editorleaf) drawLineNumberNumber(n int, x, y int, style tcell.Style) {
 // HighlightsLayer の情報から描画色を決定する
 // highlightPosStatus 以降で pos と Traverse な関係にある highlights.Span を返す。
 func (e Editorleaf) FindHighlightSpan(
-	pos rows.RowsPos,
+	pos editbuffer.RowsPos,
 	stat highlightPosStatus,
 ) (*highlight.Span, highlightPosStatus, bool) {
 
@@ -1546,17 +1578,23 @@ func (e Editorleaf) FindHighlightSpan(
 	)
 	// gelog.Debug("maxPriority", maxPriority)
 
-	for priorityIndex := maxPriority; priorityIndex >= 0; priorityIndex-- {
+	/* for priorityIndex := maxPriority; priorityIndex >= 0; priorityIndex-- {
 
 		// e.meta.HighlightLayer と e.highlightLayer では、
 		// 同一 priorityIndex において、両方が Highlights を持つことはない。
 		// 両方が Highlights を持たないことはある。
+		//
+		// Peek() を使う: Highlights() は呼ぶだけで対象スロットを
+		// &Highlights{} で自動生成してしまい、常に非 nil を返すため、
+		// 「このレイヤーには無い」を検出できず e.highlightLayer 側に
+		// フォールバックできなかった (syntax highlighting が一切
+		// 表示されない原因だった)。
 		layerIndex := highlightMeta
-		hl := e.meta.HighlightLayer.Highlights(priorityIndex)
+		hl := e.meta.HighlightLayer.Peek(priorityIndex)
 
 		if hl == nil {
 			layerIndex = highlightEditor
-			hl = e.highlightLayer.Highlights(priorityIndex)
+			hl = e.highlightLayer.Peek(priorityIndex)
 		}
 
 		if hl == nil {
@@ -1604,6 +1642,67 @@ func (e Editorleaf) FindHighlightSpan(
 			isOnCursor = true
 		}
 		return span, stat, isOnCursor
+	} */
+
+	for priorityIndex := maxPriority; priorityIndex >= 0; priorityIndex-- {
+		for _, layerIndex := range []int{
+			highlightMeta,
+			highlightEditor,
+		} {
+			var hl *highlight.Highlights
+
+			switch layerIndex {
+			case highlightMeta:
+				hl = e.meta.HighlightLayer.Peek(priorityIndex)
+			case highlightEditor:
+				hl = e.highlightLayer.Peek(priorityIndex)
+			}
+
+			if hl == nil {
+				continue
+			}
+
+			currentSpanIndex := stat.Get(layerIndex, priorityIndex)
+
+			// 現在位置とマッチしているか確認
+			if currentSpanIndex >= 0 &&
+				currentSpanIndex < hl.SpansLength() {
+
+				span := hl.GetSpan(currentSpanIndex)
+
+				if highlight.PosInSpan(pos, span) {
+					isOnCursor := false
+					if highlight.PosInSpan(e.meta.RowsPos, span) {
+						isOnCursor = true
+					}
+					return span, stat, isOnCursor
+				}
+			}
+
+			// 現在位置から再検索
+			spanIndex := hl.MatcheFirstRegenSpanIndex(
+				pos,
+				max(0, currentSpanIndex),
+			)
+
+			if spanIndex == -1 {
+				continue
+			}
+
+			span := hl.GetSpan(spanIndex)
+			if span == nil {
+				continue
+			}
+
+			stat.Set(layerIndex, priorityIndex, spanIndex)
+
+			isOnCursor := false
+			if highlight.PosInSpan(e.meta.RowsPos, span) {
+				isOnCursor = true
+			}
+
+			return span, stat, isOnCursor
+		}
 	}
 
 	return nil, stat, false

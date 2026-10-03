@@ -4,15 +4,15 @@ import (
 	"path/filepath"
 
 	"github.com/ge-editor/editorleaf/buffer"
-	"github.com/ge-editor/editorleaf/editbuffer/rows"
+	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/gecore"
 )
 
 type fileState struct {
-	RowsPos rows.RowsPos
+	RowsPos editbuffer.RowsPos
 }
 
-func saveState(path string, c rows.RowsPos) {
+func saveState(path string, c editbuffer.RowsPos) {
 	absPath, _ := filepath.Abs(path)
 	gecore.AppState().Save(
 		"editor:"+absPath,

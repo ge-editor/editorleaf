@@ -1,6 +1,6 @@
-package rows
+package editbuffer
 
-func (rs *Rows) InsertRegion(rowIndex, colIndex int, rows Rows) {
+func (rs *Rows_) insertRegion(rowIndex, colIndex int, rows Rows_) {
 	if len(rows) == 0 {
 		return
 	}
@@ -17,7 +17,7 @@ func (rs *Rows) InsertRegion(rowIndex, colIndex int, rows Rows) {
 	// Single row insertion: simply insert the bytes.
 	if len(rows) == 1 {
 		(*rs)[rowIndex] = append(
-			append(make(Row, 0, len(left)+len(rows[0])+len(right)),
+			append(make(Row_, 0, len(left)+len(rows[0])+len(right)),
 				left...,
 			),
 			rows[0]...,
@@ -27,12 +27,12 @@ func (rs *Rows) InsertRegion(rowIndex, colIndex int, rows Rows) {
 	}
 
 	// First row: left + inserted first row.
-	first := make(Row, 0, len(left)+len(rows[0]))
+	first := make(Row_, 0, len(left)+len(rows[0]))
 	first = append(first, left...)
 	first = append(first, rows[0]...)
 
 	// Last row: inserted last row + right.
-	last := make(Row, 0, len(rows[len(rows)-1])+len(right))
+	last := make(Row_, 0, len(rows[len(rows)-1])+len(right))
 	last = append(last, rows[len(rows)-1]...)
 	last = append(last, right...)
 
@@ -51,17 +51,17 @@ func (rs *Rows) InsertRegion(rowIndex, colIndex int, rows Rows) {
 	(*rs).InsertRow(insertIndex, last)
 }
 
-// RemoveRegion removes the specified region and returns the removed bytes.
+// removeRegion removes the specified region and returns the removed bytes.
 // The region is half-open: [start, end).
 // No undo/redo functionality is provided by this package.
-func (rs *Rows) RemoveRegion(start, end RowsPos) Rows {
+func (rs *Rows_) removeRegion(start, end RowsPos) Rows_ {
 	return rs.region(start, end, true)
 }
 
 // GetRegion returns a copy of the specified region without modifying the rows.
 // The region is half-open: [start, end).
 // No undo/redo functionality is provided by this package.
-func (rs *Rows) GetRegion(start, end RowsPos) Rows {
+func (rs *Rows_) GetRegion(start, end RowsPos) Rows_ {
 	return rs.region(start, end, false)
 }
 
@@ -70,7 +70,7 @@ func (rs *Rows) GetRegion(start, end RowsPos) Rows {
 //
 // colIndex is a byte offset within a row.
 // len(row) is a valid row-end position.
-func (rs *Rows) region(start, end RowsPos, doRemove bool) Rows {
+func (rs *Rows_) region(start, end RowsPos, doRemove bool) Rows_ {
 	// Validate row indices.
 	if start.RowIndex < 0 ||
 		end.RowIndex < 0 ||
@@ -103,7 +103,7 @@ func (rs *Rows) region(start, end RowsPos, doRemove bool) Rows {
 
 	// Same row.
 	if start.RowIndex == end.RowIndex {
-		removed := Rows{
+		removed := Rows_{
 			topRow.Copy(start.ColIndex, end.ColIndex),
 		}
 
@@ -114,11 +114,11 @@ func (rs *Rows) region(start, end RowsPos, doRemove bool) Rows {
 		return removed
 	}
 
-	removed := make(Rows, 0, end.RowIndex-start.RowIndex+1)
+	removed := make(Rows_, 0, end.RowIndex-start.RowIndex+1)
 
 	// Top row: remove everything from start.ColIndex to the end.
 	removed = append(removed,
-		Row(topRow.Bytes()[start.ColIndex:]).Clone(),
+		Row_(topRow.Bytes()[start.ColIndex:]).Clone(),
 		// topRow.Copy(start.ColIndex, topRow.Length()),
 	)
 
@@ -133,7 +133,7 @@ func (rs *Rows) region(start, end RowsPos, doRemove bool) Rows {
 
 	// Bottom row: remove everything from the beginning to end.ColIndex.
 	removed = append(removed,
-		Row(bottomRow.Bytes()[:end.ColIndex]).Clone(),
+		Row_(bottomRow.Bytes()[:end.ColIndex]).Clone(),
 		// bottomRow.Copy(0, end.ColIndex),
 	)
 

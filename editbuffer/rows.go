@@ -1,4 +1,4 @@
-package rows
+package editbuffer
 
 import (
 	"slices"
@@ -7,45 +7,45 @@ import (
 	"github.com/ge-editor/utils"
 )
 
-type Rows []Row
+type Rows_ []Row_
 
-func New() *Rows {
-	r := make(Rows, 0, 64)
+func NewRowsType() *Rows_ {
+	r := make(Rows_, 0, 64)
 	return &r
 }
 
-// SetRows replaces the current rows.
+// setRows replaces the current rows.
 // The supplied rows are normalized so that row data does not contain
 // line separators.
-func (rs *Rows) SetRows(newRows Rows) {
+func (rs *Rows_) setRows(newRows Rows_) {
 	*rs = newRows
 }
 
-// Clone returns a completely independent copy of the rows.
+// CloneRows returns a completely independent copy of the rows.
 //
 // Both the Rows slice and the byte data of each Row are copied,
 // so modifications to the returned rows do not affect the original.
-func (rs Rows) Clone() Rows {
+func (rs Rows_) CloneRows() Rows_ {
 	if rs == nil {
 		return nil
 	}
 
-	cloned := make(Rows, len(rs))
+	cloned := make(Rows_, len(rs))
 
 	for i, row := range rs {
 		if row == nil {
 			continue
 		}
 
-		cloned[i] = make(Row, len(row))
+		cloned[i] = make(Row_, len(row))
 		copy(cloned[i], row)
 	}
 
 	return cloned
 }
 
-func (rs Rows) Reversed() Rows {
-	result := make(Rows, len(rs))
+func (rs Rows_) Reversed() Rows_ {
+	result := make(Rows_, len(rs))
 
 	for i := range rs {
 		result[len(rs)-1-i] = utils.ReverseUTF8Bytes(rs[i])
@@ -54,14 +54,14 @@ func (rs Rows) Reversed() Rows {
 	return result
 }
 
-// SetBytesArray replaces the current rows from [][]byte.
+// setBytesArray replaces the current rows from [][]byte.
 // Line separators are removed from each row.
-func (rs *Rows) SetBytesArray(source [][]byte) {
-	rows := make(Rows, 0, len(source))
+func (rs *Rows_) setBytesArray(source [][]byte) {
+	rows := make(Rows_, 0, len(source))
 
 	for _, b := range source {
 		b = trimNewline(b)
-		rows = append(rows, Row(b))
+		rows = append(rows, Row_(b))
 	}
 
 	*rs = rows
@@ -85,7 +85,7 @@ func trimNewline(b []byte) []byte {
 }
 
 // SetRow sets the content of a specific line by index
-func (rs *Rows) SetRow(rowIndex int, row []byte) bool {
+func (rs *Rows_) SetRow(rowIndex int, row []byte) bool {
 	if rowIndex < 0 || rowIndex >= len(*rs) {
 		return false
 	}
@@ -93,7 +93,7 @@ func (rs *Rows) SetRow(rowIndex int, row []byte) bool {
 	return true
 }
 
-func (rs Rows) BytesArray() [][]byte {
+func (rs Rows_) BytesArray() [][]byte {
 	b := make([][]byte, len(rs))
 	for i, r := range rs {
 		b[i] = []byte(r)
@@ -101,7 +101,7 @@ func (rs Rows) BytesArray() [][]byte {
 	return b
 }
 
-func (rs *Rows) Row(rowIndex int) *Row {
+func (rs *Rows_) Row(rowIndex int) *Row_ {
 	if rowIndex < 0 || rowIndex >= len(*rs) {
 		return nil
 	}
@@ -109,7 +109,7 @@ func (rs *Rows) Row(rowIndex int) *Row {
 }
 
 // AddRow adds a new []byte to the lines **slices**
-func (rs *Rows) AddRow(data []byte) {
+func (rs *Rows_) AddRow(data []byte) {
 	*rs = append(*rs, data)
 }
 
@@ -122,7 +122,7 @@ func (rs *Rows) AddRow(data []byte) {
 //	r:  dd ee
 //
 //	result: aa bb ccdd ee
-func (rs *Rows) Join(r Rows) {
+func (rs *Rows_) Join(r Rows_) {
 	if len(r) == 0 {
 		return
 	}
@@ -149,19 +149,19 @@ func (rs *Rows) Join(r Rows) {
 //	r:  dd ee
 //
 //	result: aa bb ccdd ee
-func (rs Rows) Joined(r Rows) Rows {
+func (rs Rows_) Joined(r Rows_) Rows_ {
 	if len(r) == 0 {
-		return append(Rows(nil), rs...)
+		return append(Rows_(nil), rs...)
 	}
 	if len(rs) == 0 {
-		return append(Rows(nil), r...)
+		return append(Rows_(nil), r...)
 	}
 
-	result := make(Rows, 0, len(rs)+len(r)-1)
+	result := make(Rows_, 0, len(rs)+len(r)-1)
 	result = append(result, rs[:len(rs)-1]...)
 
 	// Join the last row of rs with the first row of r.
-	last := append(Row(nil), rs[len(rs)-1]...)
+	last := append(Row_(nil), rs[len(rs)-1]...)
 	last = append(last, r[0]...)
 	result = append(result, last)
 
@@ -172,13 +172,13 @@ func (rs Rows) Joined(r Rows) Rows {
 }
 
 // delete rows[col1:col2]
-func (rs *Rows) Delete(col1, col2 int) {
+func (rs *Rows_) Delete(col1, col2 int) {
 	*rs = slices.Delete(*rs, col1, col2)
 	// return slices.Delete(*r, col1, col2)
 }
 
 // InsertRow inserts a new line at the specified index
-func (rs *Rows) InsertRow(rowIndex int, row []byte) bool {
+func (rs *Rows_) InsertRow(rowIndex int, row []byte) bool {
 	if rowIndex < 0 || rowIndex > len(*rs) {
 		return false
 	}
@@ -186,15 +186,15 @@ func (rs *Rows) InsertRow(rowIndex int, row []byte) bool {
 	return true
 }
 
-func (rs *Rows) Length() int {
+func (rs *Rows_) Length() int {
 	return len(*rs)
 }
 
-func (rs Rows) IsRowIndexLastRow(rowIndex int) bool {
+func (rs Rows_) IsRowIndexLastRow(rowIndex int) bool {
 	return rowIndex >= 0 && rowIndex == len(rs)-1
 }
 
-func (rs Rows) String(newline []byte) string {
+func (rs Rows_) JoinString(newline []byte) string {
 	var s strings.Builder
 
 	for _, r := range rs {

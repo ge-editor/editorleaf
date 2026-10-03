@@ -249,7 +249,7 @@ func (b *BoundariesArray) NeedsCompute(rowIndex int) bool {
 	// This check is useful for validating the initial state of the Rows buffer.
 	// It does not compare the actual row contents.
 	// RuneWidthCache always includes one extra entry for LF or EOF.
-	if len(row.RuneWidthCache) != b.editor.editBuffer.Rows.Row(rowIndex).Length()+1 {
+	if len(row.RuneWidthCache) != b.editor.editBuffer.Rows().Row(rowIndex).Length()+1 {
 		return true
 	}
 
