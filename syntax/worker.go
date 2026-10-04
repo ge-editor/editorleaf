@@ -1,3 +1,6 @@
+// worker_a.go
+// 2026-10-03 Sat
+
 package syntax
 
 import (
@@ -45,6 +48,12 @@ type Worker struct {
 	// Owned by run() only.
 	li  *editbuffer.LineIndex
 	src []byte
+
+	// fullParse is set when a Parse (after a reset) was cancelled, so the
+	// parser's tree does not describe src. Until a Parse completes, changes
+	// only update li/src and the parser is fully reparsed at the end of the
+	// batch instead of receiving incremental Edit calls.
+	fullParse bool
 
 	// desynced is set when a Change could not be applied to li (see
 	// applyChange). It means li/src no longer describe the buffer.
@@ -179,6 +188,130 @@ func (w *Worker) run() {
 		ctx, cancel := context.WithCancel(context.Background())
 		w.activeCancel = cancel
 		w.mu.Unlock()
+
+		finish := func() {
+			cancel()
+			w.mu.Lock()
+			w.activeCancel = nil
+			w.mu.Unlock()
+		}
+
+		// --- Reset: rebuild everything from the snapshot ---
+		if reset {
+			w.li.Reset(snapshot)
+			w.src = []byte(snapshot.JoinString([]byte{'\n'}))
+			w.desynced = false
+			w.fullParse = false
+
+			w.parser.Parse(ctx, w.src)
+			canceled := ctx.Err() != nil
+			finish()
+			if canceled {
+				// The parser's tree does not match src. Changes that are
+				// already pending (or arrive later) are applied to li/src
+				// only, then the parser reparses from scratch.
+				w.fullParse = true
+				w.wakeUp()
+				continue
+			}
+			w.publish()
+			continue
+		}
+
+		if w.desynced || (len(changes) == 0 && !w.fullParse) {
+			finish()
+			continue
+		}
+
+		// --- Incremental: apply changes[0:next] ---
+		ok := true
+		next := 0 // index of the first change that has NOT been applied
+		for next < len(changes) {
+			if ctx.Err() != nil {
+				break
+			}
+			if !w.applyChange(ctx, changes[next]) {
+				ok = false
+				break
+			}
+			// Applied to li/src (and the parser's tree) even if ctx was
+			// cancelled while the parser was reparsing, so count it.
+			next++
+		}
+
+		canceled := ctx.Err() != nil
+
+		// Recovering from a cancelled reset parse: all changes were applied
+		// to li/src only, so reparse the full source once.
+		if ok && w.fullParse && next == len(changes) && !canceled {
+			w.parser.Parse(ctx, w.src)
+			canceled = ctx.Err() != nil
+			if !canceled {
+				w.fullParse = false
+			}
+		}
+
+		finish()
+
+		// Cancelled mid-batch: put the unapplied changes back in front of
+		// anything that arrived meanwhile, instead of dropping them.
+		if ok && next < len(changes) {
+			w.requeue(changes[next:])
+			continue
+		}
+
+		// On desync, applyChange already cleared the layer; publishing here
+		// would immediately refill it with stale spans.
+		if ok && !canceled && !w.fullParse {
+			w.publish()
+		}
+	}
+}
+
+// requeue puts changes that were taken from pending but not applied back at
+// the front of the pending list, preserving order.
+func (w *Worker) requeue(rest []editbuffer.Change) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	// A reset arrived meanwhile: its snapshot already reflects every change,
+	// so replaying the old ones would corrupt li/src.
+	if w.needsReset {
+		return
+	}
+
+	merged := make([]editbuffer.Change, 0, len(rest)+len(w.pending))
+	merged = append(merged, rest...)
+	merged = append(merged, w.pending...)
+	w.pending = merged
+
+	w.wakeUp()
+}
+
+/* func (w *Worker) run() {
+	defer close(w.done)
+	defer w.parser.Close()
+
+	for {
+		select {
+		case <-w.quit:
+			return
+		case <-w.wake:
+		}
+
+		w.mu.Lock()
+		select {
+		case <-w.quit:
+			w.mu.Unlock()
+			return
+		default:
+		}
+		reset, snapshot := w.needsReset, w.snapshot
+		changes := w.pending
+		w.needsReset, w.snapshot, w.pending = false, nil, nil
+		ctx, cancel := context.WithCancel(context.Background())
+		w.activeCancel = cancel
+		w.mu.Unlock()
 		deferCancel := func() {
 			cancel()
 			w.mu.Lock()
@@ -226,12 +359,26 @@ func (w *Worker) run() {
 			w.publish()
 		}
 	}
-}
+} */
 
 // applyChange updates li/src for one change and feeds it to the parser.
 // It returns false if the change could not be applied (li is out of sync
 // with the buffer); the caller stops processing the rest of the batch and
 // waits for a ChangeReset to recover. See the desynced field comment.
+/* func (w *Worker) applyChange(ctx context.Context, c editbuffer.Change) bool {
+	e, ok := w.li.Apply(c)
+	if !ok {
+		w.desynced = true
+		w.dispatchUI(func() {
+			clearLayer(w.target, w.priority) // avoid showing highlighting for a now-wrong tree
+		})
+		return false
+	}
+
+	w.src = spliceBytes(w.src, e.StartByte, e.OldEndByte, e.NewEndByte, c.TextLF())
+	w.parser.Edit(ctx, toSyntaxEdit(e), w.src)
+	return true
+} */
 func (w *Worker) applyChange(ctx context.Context, c editbuffer.Change) bool {
 	e, ok := w.li.Apply(c)
 	if !ok {
@@ -243,6 +390,13 @@ func (w *Worker) applyChange(ctx context.Context, c editbuffer.Change) bool {
 	}
 
 	w.src = spliceBytes(w.src, e.StartByte, e.OldEndByte, e.NewEndByte, c.TextLF())
+
+	// The parser's tree is stale (a reset Parse was cancelled): skip the
+	// incremental edit; run() reparses the whole source afterwards.
+	if w.fullParse {
+		return true
+	}
+
 	w.parser.Edit(ctx, toSyntaxEdit(e), w.src)
 	return true
 }

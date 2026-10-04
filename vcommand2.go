@@ -1034,9 +1034,12 @@ func (e *Editorleaf) killRegion(start, stop editbuffer.RowsPos) {
 
 	e.syncCursorAndBufferForEdit(DELETE, start, stop)
 	e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{
-		Class:  editbuffer.DELETE_BACKWARD,
-		Before: start,
-		After:  stop,
+		// 2026-10-03 Crash 修正
+		Class: editbuffer.DELETE_BACKWARD, // Redo も直す
+		// Before: start,
+		// After:  stop,
+		Before: stop,
+		After:  start,
 		Data:   removed,
 	}, true)
 
@@ -1141,6 +1144,8 @@ func (e *Editorleaf) Undo() {
 		case editbuffer.DELETE_BACKWARD:
 			gelog.Debug("Undo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
 
+			// 2026-10-03 Crash 修正
+			e.meta.RowsPos = a.After // (2. の統一後。start 側)
 			e.insertRows(a.Data, false)
 			e.syncCursorAndBufferForEdit(
 				INSERT,
@@ -1152,7 +1157,8 @@ func (e *Editorleaf) Undo() {
 			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
 			e.rebuildBufferState(a.After, a.Before, editbuffer.INSERT)
 
-			e.meta.RowsPos = a.After
+			// 2026-10-03 Crash 修正
+			// e.meta.RowsPos = a.After
 
 		default:
 			return
@@ -1200,8 +1206,11 @@ func (e *Editorleaf) Redo() {
 
 			e.meta.RowsPos = a.Before
 			e.editBuffer.RemoveRegion(
-				a.Before,
+				// 2026-10-03 Crash 修正
+				// a.Before,
+				// a.After,
 				a.After,
+				a.Before,
 			)
 			e.syncCursorAndBufferForEdit(
 				DELETE,
@@ -1243,7 +1252,8 @@ func (e *Editorleaf) Redo() {
 	}
 }
 
-func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) editbuffer.RowsPos {
+// 2026-10-03 Crash 修正
+/* func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) editbuffer.RowsPos {
 	cursor := a.Before
 
 	if len(a.Data) == 0 {
@@ -1255,6 +1265,25 @@ func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) editbuffer.Rows
 	cursor.RowIndex += len(a.Data) - 1
 	cursor.ColIndex += len(last)
 
+	return cursor
+} */
+
+// 2026-10-03 Crash 修正
+func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) editbuffer.RowsPos {
+	cursor := a.Before
+
+	if len(a.Data) == 0 {
+		return cursor
+	}
+
+	last := a.Data[len(a.Data)-1]
+
+	if len(a.Data) == 1 {
+		cursor.ColIndex += len(last)
+	} else {
+		cursor.RowIndex += len(a.Data) - 1
+		cursor.ColIndex = len(last) // ← 複数行のときは Before.ColIndex を足してはいけない
+	}
 	return cursor
 }
 

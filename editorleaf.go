@@ -1054,6 +1054,8 @@ func (e *Editorleaf) drawLineWithCompute(
 		currentCell.Width = utils.RuneWidth(currentCell.Ch)
 		currentCell.Class = e.locale.GetCharClass(currentCell.Ch)
 
+		// Highlight Style
+		isNoSpanStyle := true
 		// Special char width
 		if currentCell.Ch == define.EOF && isLastCh && lines.isFinalRow {
 			currentCell.Class = locale.EOF
@@ -1072,20 +1074,18 @@ func (e *Editorleaf) drawLineWithCompute(
 		} else if locale.Is(currentCell, locale.CONTROLCODE) {
 			currentCell.Width = 2 // ^X
 			currentCell.Style = theme.ColorControlCode
-		}
-
-		// Highlight Style
-		isNoSpanStyle := true
-		span, _, isOnCursor := e.FindHighlightSpan(editbuffer.RowsPos{RowIndex: rowIndex, ColIndex: bytePosOfRow}, stat)
-		if span != nil {
-			if isOnCursor {
-				currentCell.Style = span.ColorIfActive
-			} else {
-				currentCell.Style = span.Color
+		} else {
+			// Highlight Style
+			span, _, isOnCursor := e.FindHighlightSpan(editbuffer.RowsPos{RowIndex: rowIndex, ColIndex: bytePosOfRow}, stat)
+			if span != nil {
+				if isOnCursor {
+					currentCell.Style = span.ColorIfActive
+				} else {
+					currentCell.Style = span.Color
+				}
+				isNoSpanStyle = false
 			}
-			isNoSpanStyle = false
 		}
-
 		currentCell.Style = currentCell.Style.Underline(isUnderline())
 
 		if sx+currentCell.Width >= contentWidth-rightEdgeWrapMargin && locale.IsBreakpoint(prevPrevCell, prevCell, currentCell) { // ★★

@@ -68,7 +68,7 @@ func dispatchUI(fn func()) {
 	postSyntaxUpdateWake()
 }
 
-func postSyntaxUpdateWake() {
+/* func postSyntaxUpdateWake() {
 	// EventQ is closed by Fini. A worker finishing as the app shuts down
 	// must not panic while trying to schedule its final UI update.
 	defer func() { _ = recover() }()
@@ -76,6 +76,24 @@ func postSyntaxUpdateWake() {
 	// case screen.Get().EventQ() <- tcell.NewEventInterrupt("ge-syntax-update"):
 	// Redraw on resize event
 	case screen.Get().EventQ() <- tcell.NewEventResize(screen.Get().Size()):
+	default:
+	}
+} */
+
+func postSyntaxUpdateWake() {
+	defer func() { _ = recover() }()
+
+	q := screen.Get().EventQ()
+
+	select {
+	case q <- tcell.NewEventResize(screen.Get().Size()):
+	default:
+	}
+
+	// debug 用
+	// syntax highlighting の完了を通知する
+	select {
+	case q <- tcell.NewEventInterrupt("ge-syntax-update"):
 	default:
 	}
 }
