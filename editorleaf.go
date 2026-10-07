@@ -123,10 +123,15 @@ func (e *Editorleaf) Commands() []excommand.ExCommand {
 			CommandDescription: "Shell command",
 			Run: func(ctx context.Context, args []string) (bool, error) {
 				result, err := utils.ExecShellCommand(strings.Join(args, " "))
+				// gelog.Debug("Run shell command")
 				if err != nil {
 					gecore.Echo.AddText(err.Error())
+					return true, err
 				}
-				e.InsertString(result)
+				// gecore.Echo.AddText("result", result)
+				if result != "" {
+					e.InsertString(result)
+				}
 				return true, nil
 			},
 		},
