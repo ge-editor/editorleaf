@@ -1337,20 +1337,6 @@ func (e Editorleaf) SetRows(r editbuffer.Rows_) {
 	})
 }
 
-/*
-func (e Editorleaf) SetRows(r [][]byte) {
-	e.editBuffer.SetBytesArray(r)
-
-	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
-		ed, ok := l.(*Editorleaf)
-		if !ok {
-			return
-		}
-		ed.bsArray.ClearAll()
-	})
-}
-*/
-
 func (e *Editorleaf) RowsLength() int {
 	return e.editBuffer.Rows().Length()
 }

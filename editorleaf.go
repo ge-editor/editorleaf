@@ -4,7 +4,9 @@ package editorleaf
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gdamore/tcell/v3"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/ge-editor/editorleaf/mark"
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/define"
+	"github.com/ge-editor/gecore/excommand"
 	"github.com/ge-editor/gecore/marks"
 	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/gecore/tree"
@@ -98,6 +101,47 @@ type Editorleaf struct {
 	// registered syntax.Parser. nil otherwise. Set in Init, called and
 	// cleared in WillCloseTreesitter.
 	syntaxDetach func()
+}
+
+func (e *Editorleaf) Commands() []excommand.ExCommand {
+	return []excommand.ExCommand{
+		&Command{
+			CommandName:        "test 2",
+			CommandDescription: "Exit the editor 2",
+			Run: func(ctx context.Context, args []string) (bool, error) {
+				// 終了処理
+				return true, nil
+			},
+		},
+
+		// ! （shell-command / M-!）
+		// ショートカット: M-! (async-shell-command は M-&)
+		// 機能: Emacsのミニバッファから直接、OSのシェルコマンドを1回きりで実行するためのコマンドです。
+		// 動作: M-! を押すとプロンプトが出るので、そこで ls -la や git status などのコマンドを入力して実行します。出力結果は専用のウィンドウ（*Shell Command Output*）に表示されます。
+		&Command{
+			CommandName:        "!",
+			CommandDescription: "Shell command",
+			Run: func(ctx context.Context, args []string) (bool, error) {
+				result, err := utils.ExecShellCommand(strings.Join(args, " "))
+				if err != nil {
+					gecore.Echo.AddText(err.Error())
+				}
+				e.InsertString(result)
+				return true, nil
+			},
+		},
+
+		// | （shell-command-on-region / M-|）
+		// リージョン（選択範囲）を選択した状態で
+		// 機能: バッファ内で選択した範囲（リージョン）のテキストを、外部のシェルコマンドの標準入力（stdin）として流し込むためのコマンドです。
+		&Command{
+			CommandName:        "|",
+			CommandDescription: "Shell command oneregion",
+			Run: func(ctx context.Context, args []string) (bool, error) {
+				return true, nil
+			},
+		},
+	}
 }
 
 func (e *Editorleaf) SetKeyDispatcher(km *keychord.RootNode) {

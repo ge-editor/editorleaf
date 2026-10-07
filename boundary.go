@@ -2,6 +2,7 @@ package editorleaf
 
 import (
 	"fmt"
+	"runtime"
 	"slices"
 
 	//"github.com/ge-editor/editorleaf/search"
@@ -283,6 +284,21 @@ func (b *BoundariesArray) beAvailable(rowIndex int) {
 func (b *BoundariesArray) GetIndexOfLastLogicalRow(rowIndex int) int {
 	b.beAvailable(rowIndex)
 	return len(b.rows[rowIndex].Boundaries) - 1
+}
+
+// 呼び出し元の情報を整形して返すヘルパー関数
+func CallerInfo(n int) string {
+	// skip:
+	// 0: Caller自身
+	// 1: callerInfoの呼び出し元
+	// 2: さらにその呼び出し
+	pc, file, line, ok := runtime.Caller(n)
+	if !ok {
+		return "unknown:0"
+	}
+	// パス全体が長い場合はファイル名だけに絞ることも可能
+	// shortFile := filepath.Base(file)
+	return fmt.Sprintf("%s:%d (%s)", file, line, runtime.FuncForPC(pc).Name())
 }
 
 // Returns the screen position of the cursor corresponding from cached array to the specified column index in logical rows.
