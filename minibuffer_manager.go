@@ -1,6 +1,8 @@
 package editorleaf
 
 import (
+	"context"
+
 	"github.com/gdamore/tcell/v3"
 
 	"github.com/ge-editor/gecore"
@@ -155,14 +157,14 @@ func (m *MinibufferManagerStruct) MinibufferResize(overlayRect screen.Rect) int 
 	return height
 }
 
-func (m *MinibufferManagerStruct) Draw() bool {
+func (m *MinibufferManagerStruct) Draw(ctx context.Context) bool {
 	if !m.active {
 		return false
 	}
 
 	screen.Get().FillRect(m.overlayRect, 0, theme.ColorDefault)
 	screen.Get().DrawLabel(m.overlayRect, &screen.LabelParams{Style: theme.ColorDefault}, m.session.Prompt)
-	m.session.Editor.Draw()
+	m.session.Editor.Draw(ctx)
 	return false
 }
 

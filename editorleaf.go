@@ -200,6 +200,11 @@ func (e *Editorleaf) LeafType() tree.LeafType {
 }
 
 func (e *Editorleaf) Resize(viewArea screen.Rect) {
+	needRestBoundary := false
+	if e.viewArea.Width != viewArea.Width {
+		needRestBoundary = true
+	}
+
 	e.viewArea = viewArea
 	e.editArea = viewArea
 	if e.mode != ModeEditor {
@@ -211,12 +216,15 @@ func (e *Editorleaf) Resize(viewArea screen.Rect) {
 		e.editArea.Height -= 1 // status
 		e.verticalThreshold = utils.Threshold(verticalThreshold, e.editArea.Height)
 	}
-	e.bsArray.ClearAll()
-	e.Draw() // Need call self drawing
+
+	if needRestBoundary {
+		e.bsArray.ClearAll()
+		// e.Draw() // Need call self drawing
+	}
 }
 
-func (e *Editorleaf) Draw() bool {
-	if e.drawEditorleaf() {
+func (e *Editorleaf) Draw(ctx context.Context) bool {
+	if e.drawEditorleaf(ctx) {
 		return true
 	}
 	e.drawRightBar()
@@ -666,7 +674,7 @@ func (e *Editorleaf) drawRightBar() {
 // on a full queue or a screen already tearing down at shutdown, a
 // dropped redraw request just means the next real event's draw shows the
 // up-to-date highlighting instead of this one.
-func requestRedraw() {
+/* func requestRedraw() {
 	// _ = screen.Get().PostEvent(tcell.NewEventInterrupt(nil))
 	// overlay.OverlayManager().Draw()
 	// _ = screen.Get().PostEvent(tcell.NewEventInterrupt(nil))
@@ -677,9 +685,10 @@ func requestRedraw() {
 	// EventQ() から返されるチャネルに直接イベントを送信する
 	screen.Get().EventQ() <- &tcell.EventResize{}
 }
+*/
 
 // Draw the screen based on Editor.currentRowIndex, logical row position logicalCY, and cursor position Editor.Cy
-func (e *Editorleaf) drawEditorleaf() bool {
+func (e *Editorleaf) drawEditorleaf(ctx context.Context) bool {
 
 	// 不整合が無いかチェック
 	/* if e.bsArray.Editor() != e {
@@ -703,15 +712,15 @@ func (e *Editorleaf) drawEditorleaf() bool {
 	_, Cy := e.meta.ScreenPos.Col, e.meta.ScreenPos.Row // ...
 
 	// Cursor position in logical row
-	if e.bsArray.NeedsCompute(e.meta.RowsPos.RowIndex) /* || e.mode == ModeMinibuffer */ {
-		_, canceled := e.drawLineWithCompute(0, e.meta.RowsPos.RowIndex, -1, false) //foundPositionIndex, foundPositionIndexes,
+	if e.bsArray.NeedsCompute(e.meta.RowsPos.RowIndex) {
+		_, canceled := e.drawLineWithCompute(ctx, 0, e.meta.RowsPos.RowIndex, -1, false)
 
 		if canceled {
 			return true
 		}
 	} else {
-		// gelog.Debug("not call compute")
-		gecore.Echo.AddText("not call compute")
+		gelog.Debug("not call compute")
+		// gecore.Echo.AddText("not call compute")
 	}
 	Lcx, Lcy := e.bsArray.CursorPositionOnScreenLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex)
 	// 更新前の meta.Cursor を保存しておいて 進める必要がある。
@@ -728,7 +737,7 @@ func (e *Editorleaf) drawEditorleaf() bool {
 			}
 
 			if e.bsArray.NeedsCompute(rowIndex) {
-				_, canceled := e.drawLineWithCompute(0, rowIndex, -1, false)
+				_, canceled := e.drawLineWithCompute(ctx, 0, rowIndex, -1, false)
 				if canceled {
 					return true
 				}
@@ -773,12 +782,12 @@ func (e *Editorleaf) drawEditorleaf() bool {
 	y := Cy - Lcy
 	// gecore.Echo.AddText(fmt.Sprintf("(rowIndex:%d, y:%d)", rowIndex, y))
 	if e.bsArray.NeedsCompute(rowIndex) {
-		_, canceled := e.drawLineWithCompute(y, rowIndex, Lcy, true)
+		_, canceled := e.drawLineWithCompute(ctx, y, rowIndex, Lcy, true)
 		if canceled {
 			return true
 		}
 	} else {
-		_, canceled := e.drawLine(y, rowIndex, Lcy)
+		_, canceled := e.drawLine(ctx, y, rowIndex, Lcy, true)
 		if canceled {
 			return true
 		}
@@ -788,13 +797,13 @@ func (e *Editorleaf) drawEditorleaf() bool {
 	rowIndex--
 	for ; rowIndex >= 0 && y >= 0; rowIndex-- {
 		if e.bsArray.NeedsCompute(rowIndex) {
-			_, canceled := e.drawLineWithCompute(y, rowIndex, -1, false)
+			_, canceled := e.drawLineWithCompute(ctx, y, rowIndex, -1, false)
 			if canceled {
 				return true
 			}
 		}
 		y -= e.bsArray.BoundariesLen(rowIndex)
-		_, canceled := e.drawLine(y, rowIndex, -1)
+		_, canceled := e.drawLine(ctx, y, rowIndex, -1, true)
 		if canceled {
 			return true
 		}
@@ -806,12 +815,12 @@ func (e *Editorleaf) drawEditorleaf() bool {
 	rowIndex++
 	for ; rowIndex < e.RowsLength() && y < Height; rowIndex++ {
 		if e.bsArray.NeedsCompute(rowIndex) {
-			_, canceled := e.drawLineWithCompute(y, rowIndex, -1, true) //, -1, foundPositionIndexes)
+			_, canceled := e.drawLineWithCompute(ctx, y, rowIndex, -1, true)
 			if canceled {
 				return true
 			}
 		} else {
-			_, canceled := e.drawLine(y, rowIndex, -1)
+			_, canceled := e.drawLine(ctx, y, rowIndex, -1, true)
 			if canceled {
 				return true
 			}
@@ -864,7 +873,7 @@ func (e *Editorleaf) drawEditorleaf() bool {
 //	-1 if the cursor is before the range,
 //	 1 if the cursor is after the range,
 //	 0 if the cursor is within the range.
-func isCursorInRange(row, col, row1, col1, row2, col2 int) int {
+/* func isCursorInRange(row, col, row1, col1, row2, col2 int) int {
 	// Handle cases where the range is reversed (either vertically or horizontally)
 	if row1 > row2 {
 		row1, row2 = row2, row1
@@ -912,6 +921,7 @@ func isCursorInRange(row, col, row1, col1, row2, col2 int) int {
 	// it is always within the range
 	return 0
 }
+*/
 
 // 10進数で何桁か
 func digitsScreenWidth(n int) int {
@@ -1033,10 +1043,20 @@ func (e *Editorleaf) isColumnOver(x, y int, chWidth int) bool {
 //   - cursorLogicalCY: Logical row number where the cursor is located,
 //     If the row to draw is not the cursor row, set -1 and call
 func (e *Editorleaf) drawLineWithCompute(
+	ctx context.Context,
 	startScreenY, rowIndex, cursorLogicalCY int,
 	isDraw bool,
 ) (int, bool) {
 	// gelog.Debug("drawLineWithCompute")
+	if !e.bsArray.NeedsCompute(rowIndex) {
+		// gelog.Debug("Not need drawLineWithCompute")
+		panic("Not need drawLineWithCompute")
+		// return e.drawLine(startScreenY, rowIndex, cursorLogicalCY)
+	} else {
+		if e.mode != ModeMinibuffer {
+			gelog.Debug("👻 drawLineWithCompute", "rowIndex", rowIndex, "caller", gelog.CallerInfo(2))
+		}
+	}
 
 	stat := highlightPosStatus{}
 
@@ -1076,16 +1096,16 @@ func (e *Editorleaf) drawLineWithCompute(
 		return sy == cursorLineY
 	}
 
-	ctx := e.parentLeafType.CancelManager().Get("draw")
+	/* ctx := e.parentLeafType.CancelManager().Get("draw")
 	if ctx == nil {
 		return -1, true
-	}
+	} */
 
 	for bytePosOfRow := 0; bytePosOfRow < rowBytes; {
 		select {
 		case <-ctx.Done():
 			gelog.Debug("Cancel drawLineWithCompute")
-			gecore.Echo.AddText("Cancel drawLineWithCompute")
+			// gecore.Echo.AddText("Cancel drawLineWithCompute")
 			e.bsArray.ClearRow(rowIndex)
 			return -1, true // canceled
 		default:
@@ -1413,9 +1433,17 @@ func (e *Editorleaf) drawLineWithCompute(
 }
 
 // without compute boundary
+// without compute boundary
+//   - useLatestHighlight: true のとき、FindHighlightSpan で最新のハイライト情報を取得し、
+//     runeWidthCache の Style を更新してから描画する。
+//     false のときは、キャッシュ済みの Style をそのまま使う。
 func (e *Editorleaf) drawLine(
+	ctx context.Context,
 	startScreenY, rowIndex, cursorLogicalCY int,
+	useLatestHighlight bool,
 ) (int, bool) {
+	// このコメントブロックは、
+	// drawLineWithCompute が正しく動作しているか調べるときに使用する
 	/*
 		return e.drawLineWithCompute(
 			startScreenY, rowIndex, cursorLogicalCY,
@@ -1453,9 +1481,53 @@ func (e *Editorleaf) drawLine(
 
 	runeWidthCache := e.bsArray.rows[rowIndex].RuneWidthCache
 
-	ctx := e.parentLeafType.CancelManager().Get("draw")
+	/* ctx := e.parentLeafType.CancelManager().Get("draw")
 	if ctx == nil {
 		return -1, true
+	} */
+
+	// ハイライトを適用してよい文字か (drawLineWithCompute と同じ条件)
+	// EOF / TAB / NEWLINE / CONTROLCODE は特殊文字なのでハイライト対象外
+	isHighlightTarget := func(cell locale.Cell) bool {
+		return !locale.Is(cell, locale.EOF) &&
+			!locale.Is(cell, locale.TAB) &&
+			!locale.Is(cell, locale.NEWLINE) &&
+			!locale.Is(cell, locale.CONTROLCODE)
+	}
+
+	// 最新の FindHighlightSpan 情報を runeWidthCache に保存する。
+	// 戻り値: スパンスタイルが適用されなかったか (drawLineWithCompute の isNoSpanStyle 相当)
+	stat := highlightPosStatus{}
+	updateHighlight := func(bytePos int) /* (isNoSpanStyle bool) */ {
+		// cell := runeWidthCache[bytePos]
+		span, _, isOnCursor := e.FindHighlightSpan(
+			editbuffer.RowsPos{RowIndex: rowIndex, ColIndex: bytePos}, stat)
+		// isNoSpanStyle = true
+		style := theme.ColorDefault
+		if span != nil {
+			if isOnCursor {
+				style = span.ColorIfActive
+			} else {
+				style = span.Color
+			}
+			// isNoSpanStyle = false
+		}
+		runeWidthCache[bytePos].Style = style // cache 更新 (underline は描画時に付与)
+		// return isNoSpanStyle
+	}
+
+	// stat は文字を順に処理して状態を更新する前提なので、
+	// 画面外にスクロールされた論理行がある場合は、描画開始位置の手前まで空回しして状態を揃える
+	if useLatestHighlight && startLogicalRowIndex > 0 {
+		first := e.bsArray.Boundary(rowIndex, 0)
+		stop := e.bsArray.Boundary(rowIndex, startLogicalRowIndex).StartLogicalRowByteIndex
+		for p := first.StartLogicalRowByteIndex; p < stop; {
+			cell := runeWidthCache[p]
+			if isHighlightTarget(cell) {
+				updateHighlight(p)
+			}
+			p += cell.Size
+		}
 	}
 
 	for logicalRowIndex := startLogicalRowIndex; logicalRowIndex < logicalRowLen; logicalRowIndex++ {
@@ -1483,20 +1555,27 @@ func (e *Editorleaf) drawLine(
 			select {
 			case <-ctx.Done():
 				gelog.Debug("Cancel drawLine")
-				gecore.Echo.AddText("Cancel drawLine")
+				// gecore.Echo.AddText("Cancel drawLine")
 				return -1, true
 			default:
 			}
 			// <-time.After(500 * time.Microsecond)
 
-			cell := runeWidthCache[bytePosOfRow]
+			// Highlight Style
+			// isNoSpanStyle := true
+			if useLatestHighlight && isHighlightTarget(runeWidthCache[bytePosOfRow]) {
+				// isNoSpanStyle = updateHighlight(bytePosOfRow)
+				updateHighlight(bytePosOfRow)
+			}
+
+			cell := runeWidthCache[bytePosOfRow] // 更新後の値を読む
 			style := cell.Style
 			if underline {
 				style = style.Underline(underline)
 			}
 
 			if locale.Is(cell, locale.CONTROLCODE) {
-				if cell.Style == theme.ColorDefault && e.isColumnOver(sx, sy, cell.Width) {
+				if cell.Style == theme.ColorControlCode && e.isColumnOver(sx, sy, cell.Width) {
 					style = style.Background(theme.ColorColumnLimitOverflowBackground)
 				}
 				e.setCellInEditArea(sx, sy, style, '^', cell.Width)
@@ -1511,8 +1590,24 @@ func (e *Editorleaf) drawLine(
 					style = style.Background(theme.ColorColumnLimitOverflowBackground)
 				}
 				e.setCellInEditArea(sx, sy, style, cell.Ch, cell.Width)
+			} else if locale.Is(cell, locale.TAB) {
+				if cell.Style == theme.ColorTab && e.isColumnOver(sx, sy, cell.Width) {
+					style = style.Background(theme.ColorColumnLimitOverflowBackground)
+				}
+				e.setCellInEditArea(sx, sy, style, cell.Ch, cell.Width)
 			} else {
-				if cell.Style == theme.ColorDefault && e.isColumnOver(sx, sy, cell.Width) {
+				// useLatestHighlight のときは isNoSpanStyle で判定 (drawLineWithCompute と同じ)
+				// false のときは従来どおり Style が Default かどうかで判定
+				/*
+					noSpan := isNoSpanStyle
+					if !useLatestHighlight {
+						noSpan = cell.Style == theme.ColorDefault
+					}
+					if noSpan && e.isColumnOver(sx, sy, cell.Width) {
+						style = style.Background(theme.ColorColumnLimitOverflowBackground)
+					}
+				*/
+				if e.isColumnOver(sx, sy, cell.Width) {
 					style = style.Background(theme.ColorColumnLimitOverflowBackground)
 				}
 				e.setCellInEditArea(sx, sy, style, cell.Ch, cell.Width)

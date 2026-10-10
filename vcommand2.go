@@ -1105,7 +1105,7 @@ func (e *Editorleaf) Undo() {
 
 		switch a.Class {
 		case editbuffer.INSERT:
-			gelog.Debug("Undo INSERT", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
+			// gelog.Debug("Undo INSERT", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
 
 			e.editBuffer.RemoveRegion(a.Before, a.After)
 			e.syncCursorAndBufferForEdit(
@@ -1328,12 +1328,20 @@ func (e *Editorleaf) SetRowsPos(c editbuffer.RowsPos) {
 func (e Editorleaf) SetRows(r editbuffer.Rows_) {
 	e.editBuffer.SetRows(r)
 
+	// 以降は、boundaries のクリア操作
+	if e.mode == ModeMinibuffer {
+		e.bsArray.ClearAll()
+		return
+	}
 	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
 		ed, ok := l.(*Editorleaf)
 		if !ok {
 			return
 		}
-		ed.bsArray.ClearAll()
+		// 同一ファイルが編集対象
+		if ed.editBuffer == e.editBuffer {
+			ed.bsArray.ClearAll()
+		}
 	})
 }
 

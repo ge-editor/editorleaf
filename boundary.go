@@ -1,11 +1,10 @@
 package editorleaf
 
 import (
+	"context"
 	"fmt"
-	"runtime"
 	"slices"
 
-	//"github.com/ge-editor/editorleaf/search"
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gelog"
 	"github.com/ge-editor/locale"
@@ -123,12 +122,12 @@ func (b *BoundariesArray) Set(
 // BoundariesLen returns the number of logical rows
 // (wrapped segments) for the specified physical row.
 func (b *BoundariesArray) BoundariesLen(rowIndex int) int {
-	b.beAvailable(rowIndex)
+	b.ensureLayoutComputed(rowIndex)
 
 	// 範囲外アクセス
 	if rowIndex >= len(b.rows) {
 		// 呼び出し元情報 + 指定インデックス + 実際の配列長を一緒に出力
-		err := fmt.Errorf("[INVALID INDEX] Called from %s | rowIndex:%d, rowsLen:%d", gelog.CallerInfo(), rowIndex, len(b.rows))
+		err := fmt.Errorf("[INVALID INDEX] Called from %s | rowIndex:%d, rowsLen:%d", gelog.CallerInfo(2), rowIndex, len(b.rows))
 		gelog.Error(err.Error())
 		gecore.Echo.AddText(err.Error())
 		panic(err)
@@ -141,14 +140,14 @@ func (b *BoundariesArray) BoundariesLen(rowIndex int) int {
 // Boundary returns the Boundary for the specified row
 // and logical row index.
 func (b *BoundariesArray) Boundary(rowIndex, logicalRowIndex int) *Boundary {
-	b.beAvailable(rowIndex)
+	b.ensureLayoutComputed(rowIndex)
 	return &b.rows[rowIndex].Boundaries[logicalRowIndex]
 }
 
 // LastBoundary returns the last logical row boundary
 // for the specified physical row.
 func (b *BoundariesArray) LastBoundary(rowIndex int) *Boundary {
-	b.beAvailable(rowIndex)
+	b.ensureLayoutComputed(rowIndex)
 	row := b.rows[rowIndex]
 	return &row.Boundaries[len(row.Boundaries)-1]
 }
@@ -198,7 +197,8 @@ func (b *BoundariesArray) Delete(rowIndex, count int) error {
 
 // ClearAll clears all cached layout information.
 func (b *BoundariesArray) ClearAll() {
-	b.rows = nil
+	// b.rows = nil
+	b.rows = b.rows[:0]
 }
 
 // ClearFrom clears all cached layout information from rowIndex onward.
@@ -271,39 +271,26 @@ func (b *BoundariesArray) NeedsCompute(rowIndex int) bool {
 }
 */
 
-// beAvailable ensures layout data for rowIndex is computed.
-func (b *BoundariesArray) beAvailable(rowIndex int) {
+// ensureLayoutComputed ensures layout data for rowIndex is computed.
+func (b *BoundariesArray) ensureLayoutComputed(rowIndex int) {
 	if b.NeedsCompute(rowIndex) {
 		b.editor.drawLineWithCompute(
+			// Context is not needed for cancellation or timeout control here,
+			// but drawLineWithCompute requires it, so pass the root context.
+			context.Background(),
 			0, rowIndex, -1, false,
-			// -1, []search.FoundPosition{},
 		)
 	}
 }
 
 func (b *BoundariesArray) GetIndexOfLastLogicalRow(rowIndex int) int {
-	b.beAvailable(rowIndex)
+	b.ensureLayoutComputed(rowIndex)
 	return len(b.rows[rowIndex].Boundaries) - 1
-}
-
-// 呼び出し元の情報を整形して返すヘルパー関数
-func CallerInfo(n int) string {
-	// skip:
-	// 0: Caller自身
-	// 1: callerInfoの呼び出し元
-	// 2: さらにその呼び出し
-	pc, file, line, ok := runtime.Caller(n)
-	if !ok {
-		return "unknown:0"
-	}
-	// パス全体が長い場合はファイル名だけに絞ることも可能
-	// shortFile := filepath.Base(file)
-	return fmt.Sprintf("%s:%d (%s)", file, line, runtime.FuncForPC(pc).Name())
 }
 
 // Returns the screen position of the cursor corresponding from cached array to the specified column index in logical rows.
 func (b *BoundariesArray) CursorPositionOnScreenLogicalRow(rowIndex, colIndex int) (lx, ly int) {
-	b.beAvailable(rowIndex)
+	b.ensureLayoutComputed(rowIndex)
 
 	// 範囲外アクセス
 	if b == nil ||
@@ -313,7 +300,7 @@ func (b *BoundariesArray) CursorPositionOnScreenLogicalRow(rowIndex, colIndex in
 		colIndex >= len(b.rows[rowIndex].RuneWidthCache) {
 
 		// 呼び出し元情報 + 指定インデックス + 実際の配列長を一緒に出力
-		err := fmt.Errorf("[INVALID INDEX] Called from %s | Target: [rowIndex:%d, colIndex:%d] | Actual limits: [rowsLen:%d, cacheLen:%d]", gelog.CallerInfo(), rowIndex, colIndex, len(b.rows), len(b.rows[rowIndex].RuneWidthCache))
+		err := fmt.Errorf("[INVALID INDEX] Called from %s | Target: [rowIndex:%d, colIndex:%d] | Actual limits: [rowsLen:%d, cacheLen:%d]", gelog.CallerInfo(2), rowIndex, colIndex, len(b.rows), len(b.rows[rowIndex].RuneWidthCache))
 		gelog.Error(err.Error())
 		gecore.Echo.AddText(err.Error())
 		// return 0, 0 // 適切なエラー処理または初期値を返す
@@ -325,7 +312,7 @@ func (b *BoundariesArray) CursorPositionOnScreenLogicalRow(rowIndex, colIndex in
 }
 
 func (b *BoundariesArray) GetIndexOfLogicalRow(rowIndex, colIndex int) int {
-	b.beAvailable(rowIndex)
+	b.ensureLayoutComputed(rowIndex)
 	cell := b.rows[rowIndex].RuneWidthCache[colIndex]
 	return cell.LogicalRowIndex
 }
@@ -333,13 +320,13 @@ func (b *BoundariesArray) GetIndexOfLogicalRow(rowIndex, colIndex int) int {
 // Check if the column index is within the last boundary of the specified row
 // Return false: out of index or not initialized.
 func (b *BoundariesArray) OnEndOfLogicalRow(rowIndex, colIndex int) bool {
-	b.beAvailable(rowIndex)
+	b.ensureLayoutComputed(rowIndex)
 	lastBoundary := b.LastBoundary(rowIndex)
 	return colIndex >= lastBoundary.StartLogicalRowByteIndex && colIndex < lastBoundary.StopLogicalRowByteIndex
 }
 
 func (b *BoundariesArray) IsEndOfLogicalRow(rowIndex, colIndex int) bool {
-	b.beAvailable(rowIndex)
+	b.ensureLayoutComputed(rowIndex)
 
 	logicalRowIndex := b.GetIndexOfLogicalRow(rowIndex, colIndex)
 
