@@ -75,7 +75,7 @@ func (e *Editorleaf) SaveFile() {
 	}
 
 	if result&editbuffer.ResultFormatted != 0 {
-		tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+		tree.ForEachLeafAll(func(l tree.Leaf) {
 			ed, ok := l.(*Editorleaf)
 			if !ok {
 				return
@@ -700,7 +700,7 @@ func (e *Editorleaf) DeleteRuneBackward() {
 	e.meta.PrevScreenPos.Col = start.ColIndex
 
 	count := stop.RowIndex - start.RowIndex
-	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) {
 		ed, ok := l.(*Editorleaf)
 		if !ok {
 			return
@@ -743,7 +743,7 @@ func (e *Editorleaf) DeleteRune() {
 	e.meta.PrevScreenPos.Col = start.ColIndex
 
 	count := stop.RowIndex - start.RowIndex
-	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) {
 		ed, ok := l.(*Editorleaf)
 		if !ok {
 			return
@@ -799,7 +799,7 @@ func (e Editorleaf) BackwardKillLine() {
 		return
 	}
 
-	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) {
 		ed, ok := l.(*Editorleaf)
 		if !ok {
 			return
@@ -848,7 +848,7 @@ func (e *Editorleaf) KillLine() {
 
 	e.meta.PrevScreenPos.Col = e.meta.RowsPos.ColIndex
 
-	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) {
 		ed, ok := l.(*Editorleaf)
 		if !ok {
 			return
@@ -1023,7 +1023,7 @@ func (e *Editorleaf) killRegion(start, stop editbuffer.RowsPos) {
 	}
 	// gelog.Debug("killRegion", "removed", removed.String([]byte{'\n'}))
 
-	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) {
 		ed, ok := l.(*Editorleaf)
 		if !ok {
 			return
@@ -1290,7 +1290,7 @@ func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) editbuffer.Rows
 // Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
 // Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
 func (e *Editorleaf) rebuildBufferState(before, after editbuffer.RowsPos, class editbuffer.ActionClass) {
-	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) {
 		ed, ok := l.(*Editorleaf)
 		if !ok {
 			return
@@ -1333,7 +1333,7 @@ func (e Editorleaf) SetRows(r editbuffer.Rows_) {
 		e.bsArray.ClearAll()
 		return
 	}
-	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) {
 		ed, ok := l.(*Editorleaf)
 		if !ok {
 			return
@@ -1428,7 +1428,7 @@ func (e *Editorleaf) insertRows(data editbuffer.Rows_, enableUndo bool) {
 	// e.meta.Cy += data.Length() - 1
 
 	// Release Boundaries
-	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) {
 		ed, ok := l.(*Editorleaf)
 		if !ok {
 			return // continue

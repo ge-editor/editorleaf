@@ -236,7 +236,7 @@ func (e *Editorleaf) Kill(leaf tree.Leaf, isActive bool) tree.Leaf {
 
 	var toReplace []*Editorleaf
 
-	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) {
 		e, ok := l.(*Editorleaf)
 		if ok {
 			if e.editBuffer == killTargetBuf {
@@ -286,6 +286,7 @@ func (e *Editorleaf) Init() {
 }
 
 func (e *Editorleaf) WillClose() {
+	e.WillCloseTreesitter()
 }
 
 func (e *Editorleaf) MinibufferMode(mode Mode) {
@@ -381,7 +382,7 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 	}
 
 	// Synchronize cursor positions and buffer boundaries in other editors linked to the same file.
-	tree.GetRootTree().ForEachLeaf(func(leaf tree.Leaf) {
+	tree.ForEachLeafAll(func(leaf tree.Leaf) {
 		editor, ok := leaf.(*Editorleaf)
 		if !ok {
 			return

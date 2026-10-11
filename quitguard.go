@@ -72,7 +72,7 @@ func (qg *quitGuard) ConfirmFunc() {
 func findMetaInTree(killTargetBuf *editbuffer.EditBuffer) *buffer.Meta {
 	var meta *buffer.Meta // nil
 
-	tree.GetRootTree().ForEachLeaf(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) {
 		e, ok := l.(*Editorleaf)
 		if ok {
 			if e.editBuffer == killTargetBuf {
