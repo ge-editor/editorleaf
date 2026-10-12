@@ -128,7 +128,8 @@ func (u *UndoStack) PushAction(a *EditAction, beAbleToJoin bool) {
 		"PushAction",
 		"after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex),
 		"before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex),
-		"data", a.Data.JoinString([]byte{'\n'}),
+		// "data", a.Data.JoinString([]byte{'\n'}),
+		"data", a.Data,
 	)
 
 	// Make a complete copy before storing the action in the undo stack.

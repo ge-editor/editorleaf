@@ -136,11 +136,13 @@ func (w *Worker) wakeUp() {
 // onChange is the EditBuffer change listener. See the threading note on
 // Worker: this runs on the UI goroutine and must be fast and non-blocking.
 func (w *Worker) onChange(c editbuffer.Change) {
+	// gelog.Debug("syntax", "onChange", c)
+
 	w.mu.Lock()
 	// Cancel the parse currently in flight. Doing this while holding the
 	// same mutex used by run() to publish activeCancel closes the race
 	// between a new edit and starting a parse for an older snapshot.
-	if w.activeCancel != nil {
+	if w.activeCancel != nil && !dbgNoCancel { // GE_TS_NOCANCEL
 		w.activeCancel()
 	}
 	switch {
@@ -173,6 +175,11 @@ func (w *Worker) run() {
 		case <-w.quit:
 			return
 		case <-w.wake:
+		}
+
+		// GE_TS_DEBOUNCE_MS: let a burst of edits settle first.
+		if dbgDebounce > 0 && !w.waitQuiet() {
+			return
 		}
 
 		w.mu.Lock()
