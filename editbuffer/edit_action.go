@@ -208,8 +208,8 @@ func (u *UndoStack) IsRedoEmpty() bool {
 	return u.index >= len(u.stack)
 }
 
-// MarkSaved marks the current position as the saved state.
-func (u *UndoStack) MarkSaved() {
+// SetSavePoint marks the current position as the saved state.
+func (u *UndoStack) SetSavePoint() {
 	u.saveMark = u.index
 }
 

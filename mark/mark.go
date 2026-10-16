@@ -1,37 +1,127 @@
 package mark
 
 import (
+	"encoding/json"
+
 	"github.com/ge-editor/editorleaf/editbuffer"
+	"github.com/ge-editor/gecore/marks"
+	"github.com/ge-editor/gecore/tree"
+	"github.com/ge-editor/gecore/workspace"
+	"github.com/ge-editor/gelog"
 )
 
 func NewMark(ff *editbuffer.EditBuffer, current editbuffer.RowsPos, content string) *Mark {
+	var wsName, trName string
+	ws := workspace.Current()
+	if ws != nil {
+		wsName = ws.Name
+	}
+	tr := tree.CurrentRootTree()
+	if tr != nil {
+		trName = tr.Name
+	}
+
 	return &Mark{
-		EditBuffer: ff,
-		RowsPos:    current,
-		Label:      content,
+		Label:         content,
+		WorkspaceName: wsName,
+		RootTreeName:  trName,
+		ExtraData: &ExtraData{
+			EditBuffer: ff,
+			RowsPos:    current,
+		},
 	}
 }
 
+// implements gecore.marks.Mark interface
 type Mark struct {
-	EditBuffer *editbuffer.EditBuffer
+	id                string
+	Label             string
+	WorkspaceName     string
+	RootTreeName      string
+	WorkspaceFilePath string
+
+	*ExtraData
+}
+
+func (m *Mark) SetID(id string) {
+	m.id = id
+}
+
+func (m *Mark) GetID() string {
+	return m.id
+}
+
+func (m *Mark) UpdateExtraData() {
+	if m == nil || m.ExtraData == nil || m.EditBuffer == nil {
+		return
+	}
+	m.ExtraData.FilePath = m.EditBuffer.GetPath()
+}
+
+func (m *Mark) GetStoredMark() (marks.StoredMark, error) {
+	if m == nil {
+		return marks.StoredMark{}, nil
+	}
+
+	var extraData json.RawMessage
+	if m.ExtraData != nil {
+		b, err := json.Marshal(m.ExtraData)
+		if err != nil {
+			return marks.StoredMark{}, err
+		}
+		extraData = b
+	}
+
+	return marks.StoredMark{
+		ID:                m.id,
+		Label:             m.Label,
+		WorkspaceName:     m.WorkspaceName,
+		RootTreeName:      m.RootTreeName,
+		WorkspaceFilePath: m.WorkspaceFilePath,
+		ExtraData:         extraData,
+	}, nil
+}
+
+// ExtraData contains editor-specific data persisted with a mark.
+type ExtraData struct {
+	EditBuffer *editbuffer.EditBuffer `json:"-"`
+	FilePath   string                 // *editbuffer.EditBuffer.GetPath()
 	editbuffer.RowsPos
-	Label string
 }
 
-// func (m *Mark) Leaf() tree.Leaf {}
-// func (m *Mark) LeafName() string {}
+/* func (m *Mark) Equals(a *Mark) bool {
+	gelog.Debug("mark Equals", "m", *m, "a", *a)
 
-func (m *Mark) SetLabel(label string) {
-	m.Label = label
-}
+	if m.EditBuffer != nil && a.EditBuffer != nil {
+		if m.EditBuffer != a.EditBuffer {
+			return false
+		}
+	}
 
-func (m *Mark) GetLabel() string {
-	return m.Label
-}
-
-func (m *Mark) Equals(a *Mark) bool {
-	if m.EditBuffer != a.EditBuffer ||
+	if // m.EditBuffer != a.EditBuffer ||
+	m.WorkspaceName != a.WorkspaceName ||
+		m.RootTreeName != a.RootTreeName ||
+		m.WorkspaceFilePath != a.WorkspaceFilePath ||
 		!m.RowsPos.Equals(a.RowsPos) {
+		return false
+	}
+	return true
+}
+*/
+
+func Equals(a, b *Mark) bool {
+	gelog.Debug("mark Equals", "m", *a, "a", *b)
+
+	if a.EditBuffer != nil && b.EditBuffer != nil {
+		if a.EditBuffer != b.EditBuffer {
+			return false
+		}
+	}
+
+	if a.WorkspaceName != b.WorkspaceName ||
+		a.RootTreeName != b.RootTreeName ||
+		a.WorkspaceFilePath != b.WorkspaceFilePath ||
+		!a.RowsPos.Equals(b.RowsPos) {
 		return false
 	}
 	return true
@@ -110,4 +200,16 @@ func (m *Mark) AdjustForDeletion(deleteStart, deleteEnd editbuffer.RowsPos) {
 	// move it to the deletion start position.
 	m.RowIndex = deleteStart.RowIndex
 	m.ColIndex = deleteStart.ColIndex
+}
+
+// IsInDeletionRange reports whether the mark position is inside the deleted
+// range. The start is inclusive and the end is exclusive.
+func (m *Mark) IsInDeletionRange(deleteStart, deleteEnd editbuffer.RowsPos) bool {
+	if m == nil {
+		return false
+	}
+	return (m.RowIndex > deleteStart.RowIndex ||
+		(m.RowIndex == deleteStart.RowIndex && m.ColIndex > deleteStart.ColIndex)) &&
+		(m.RowIndex < deleteEnd.RowIndex ||
+			(m.RowIndex == deleteEnd.RowIndex && m.ColIndex < deleteEnd.ColIndex))
 }

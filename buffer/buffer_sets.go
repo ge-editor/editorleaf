@@ -97,7 +97,7 @@ func (bss *BufferSets) GetFileAndMeta(filePath string) (*editbuffer.EditBuffer, 
 	result := editbuffer.ResultNone
 
 	for _, buffSet := range *bss {
-		if utils.SameFile(filePath, buffSet.GetPath()) {
+		if utils.IsSameFile(filePath, buffSet.GetPath()) {
 			return buffSet.EditBuffer, buffSet.PopMeta(), result, nil
 		}
 	}

@@ -103,7 +103,7 @@ func (eb *EditBuffer) init() {
 	dir = utils.LastPartOfPath(dir)
 	wd, err := os.Getwd()
 	if err == nil {
-		if utils.SameFile(wd, dir) {
+		if utils.IsSameFile(wd, dir) {
 			eb.dispPath = filepath.Join(dir, eb.dispPath)
 		}
 	}

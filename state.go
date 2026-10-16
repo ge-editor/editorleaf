@@ -5,7 +5,7 @@ import (
 
 	"github.com/ge-editor/editorleaf/buffer"
 	"github.com/ge-editor/editorleaf/editbuffer"
-	"github.com/ge-editor/gecore"
+	"github.com/ge-editor/gecore/state"
 )
 
 type fileState struct {
@@ -14,7 +14,7 @@ type fileState struct {
 
 func saveState(path string, c editbuffer.RowsPos) {
 	absPath, _ := filepath.Abs(path)
-	gecore.AppState().Save(
+	state.AppState().Save(
 		"editor:"+absPath,
 		fileState{
 			RowsPos: c,
@@ -26,7 +26,7 @@ func loadState(path string) *buffer.Meta {
 	var st fileState
 
 	absPath, _ := filepath.Abs(path)
-	if gecore.AppState().Load(
+	if state.AppState().Load(
 		"editor:"+absPath,
 		&st,
 	) {

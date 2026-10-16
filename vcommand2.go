@@ -11,11 +11,9 @@ import (
 	"github.com/atotto/clipboard"
 
 	"github.com/ge-editor/editorleaf/editbuffer"
-	"github.com/ge-editor/editorleaf/mark"
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/define"
 	"github.com/ge-editor/gecore/killbuffer"
-	"github.com/ge-editor/gecore/marks"
 	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/gelog"
 	"github.com/ge-editor/locale"
@@ -103,7 +101,7 @@ func (e *Editorleaf) SaveFile() {
 
 	gecore.Echo.AddText("Wrote " + e.editBuffer.GetPath() + backupMessage)
 
-	e.editBuffer.UndoAction.MarkSaved()
+	e.editBuffer.UndoAction.SetSavePoint()
 }
 
 // If an existing file is specified, it will be overwritten
@@ -884,88 +882,6 @@ func (e *Editorleaf) Yank() {
 		return
 	}
 	e.insertBytesArray(b, true)
-}
-
-// --------------------
-// Mark
-// --------------------
-
-func (e *Editorleaf) MoveToMarkPosition(m *mark.Mark) {
-	e.meta.RowsPos = m.RowsPos
-}
-
-func (e *Editorleaf) SetMarkAtCursor() {
-	label := e.getContentWidthoutSpecialCharactor(e.meta.RowsPos, 20)
-	newMark := mark.NewMark(e.editBuffer, e.meta.RowsPos, label)
-
-	for _, a := range marks.Marks.Items() {
-		m, ok := a.(*mark.Mark)
-		if !ok || !m.Equals(newMark) {
-			continue
-		}
-
-		gecore.Echo.AddText("Unset mark")
-		marks.Marks.Remove(m)
-		return
-	}
-
-	gecore.Echo.AddText("Set mark")
-	marks.Marks.Add(newMark)
-}
-
-func (e *Editorleaf) findLastByEditBuffer() *mark.Mark {
-	for _, a := range marks.Marks.Items() {
-		lastMark, ok := a.(*mark.Mark)
-		if ok && lastMark.EditBuffer == e.editBuffer {
-			return lastMark
-		}
-	}
-	return nil
-}
-
-var tmpMarkPos *mark.Mark
-
-func (e *Editorleaf) SwapCursorAndMark() {
-	lastMark := e.findLastByEditBuffer()
-	if lastMark == nil {
-		gecore.Echo.AddText("No mark set")
-		return
-	}
-
-	if lastMark.RowsPos == e.meta.RowsPos {
-		if tmpMarkPos != nil {
-			e.meta.RowsPos = tmpMarkPos.RowsPos
-			tmpMarkPos = nil
-			return
-		}
-		gecore.Echo.AddText("Already at the last mark")
-		return
-	} else {
-		tmpMarkPos = mark.NewMark(e.editBuffer, e.meta.RowsPos, e.getContentWidthoutSpecialCharactor(e.meta.RowsPos, 20))
-		e.meta.RowsPos = lastMark.RowsPos
-	}
-}
-
-func (e *Editorleaf) FilterByCharacters(chars string) []*mark.Mark {
-	items := []*mark.Mark{}
-
-	for _, a := range marks.Marks.Items() {
-		mk, ok := a.(*mark.Mark)
-		if !ok {
-			continue
-		}
-
-		text := fmt.Sprintf("%s %s", mk.EditBuffer.GetBase(), utils.RemoveSymbols(mk.Label))
-		if chars != "" {
-			if utils.ContainsAllCharacters(text, chars) {
-				items = append(items, mk)
-			}
-		} else {
-			items = append(items, mk)
-		}
-	}
-
-	return items
 }
 
 // --------------------

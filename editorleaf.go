@@ -35,7 +35,6 @@ var (
 	// Initialization has been moved to the newEditor function
 	// BufferSets, _ = buffer.NewBufferSets(gecore.Files)
 	BufferSets *buffer.BufferSets
-	// Marks      = mark.NewMarks()
 )
 
 func newEditorLeaf() *Editorleaf {
@@ -355,32 +354,6 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 		break
 	}
 
-	for _, a := range marks.Marks.Items() {
-		m, ok := a.(*mark.Mark)
-		if !ok {
-			continue
-		}
-
-		switch sync {
-		case INSERT:
-			m.AdjustForInsertion(start, end)
-
-			// Skip if this buffer set is not linked to the file being edited.
-			if m.EditBuffer != e.editBuffer {
-				continue
-			}
-			m.RowsPos.AdjustForInsertion(start, end)
-		case DELETE:
-			m.AdjustForDeletion(start, end)
-
-			// Skip if this buffer set is not linked to the file being edited.
-			if m.EditBuffer != e.editBuffer {
-				continue
-			}
-			m.RowsPos.AdjustForDeletion(start, end)
-		}
-	}
-
 	// Synchronize cursor positions and buffer boundaries in other editors linked to the same file.
 	tree.ForEachLeafAll(func(leaf tree.Leaf) {
 		editor, ok := leaf.(*Editorleaf)
@@ -449,7 +422,7 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 
 	for _, a := range marks.Marks.Items() {
 		m, ok := a.(*mark.Mark)
-		if !ok {
+		if !ok || m.EditBuffer != e.editBuffer {
 			continue
 		}
 
@@ -457,6 +430,10 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 		case INSERT:
 			m.AdjustForInsertion(start, end)
 		case DELETE:
+			if m.IsInDeletionRange(start, end) {
+				marks.Marks.Remove(m)
+				continue
+			}
 			m.AdjustForDeletion(start, end)
 		}
 	}
