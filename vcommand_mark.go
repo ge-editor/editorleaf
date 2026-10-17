@@ -48,7 +48,7 @@ func toEditorMark(a marks.Mark) *mark.Mark {
 
 func (e *Editorleaf) SetMarkAtCursor() {
 	label := e.getContentWidthoutSpecialCharactor(e.meta.RowsPos, 20)
-	newMark := mark.NewMark(e.editBuffer, e.meta.RowsPos, label)
+	newMark := mark.NewMark(e.editBuffer.GetPath(), e.meta.RowsPos, label)
 
 	// gelog.Debug("marks.Marks.Items()", marks.Marks.Items())
 
@@ -74,7 +74,7 @@ func (e *Editorleaf) SetMarkAtCursor() {
 func (e *Editorleaf) findLastByEditBuffer() *mark.Mark {
 	for _, a := range marks.Marks.Items() {
 		lastMark, ok := a.(*mark.Mark)
-		if ok && lastMark.EditBuffer == e.editBuffer {
+		if ok && utils.IsSameFile(lastMark.FilePath, e.editBuffer.GetPath()) {
 			return lastMark
 		}
 	}
@@ -99,7 +99,7 @@ func (e *Editorleaf) SwapCursorAndMark() {
 		gecore.Echo.AddText("Already at the last mark")
 		return
 	} else {
-		tmpMarkPos = mark.NewMark(e.editBuffer, e.meta.RowsPos, e.getContentWidthoutSpecialCharactor(e.meta.RowsPos, 20))
+		tmpMarkPos = mark.NewMark(e.editBuffer.GetPath(), e.meta.RowsPos, e.getContentWidthoutSpecialCharactor(e.meta.RowsPos, 20))
 		e.meta.RowsPos = lastMark.RowsPos
 	}
 }
@@ -108,11 +108,6 @@ func (e *Editorleaf) FilterByCharacters(chars string) []*mark.Mark {
 	items := []*mark.Mark{}
 
 	for _, a := range marks.Marks.Items() {
-		// mk, ok := a.(*mark.Mark)
-		// if !ok {
-		// 	continue
-		// }
-
 		mk := toEditorMark(a)
 		if mk == nil {
 			continue
@@ -134,19 +129,32 @@ func (e *Editorleaf) FilterByCharacters(chars string) []*mark.Mark {
 
 ////////////////////////////
 
+// マーク位置が編集中のファイルの場合にはマーク位置に移動
+// 現在編集中のウインドウ内にマークファイルを開きマーク位置に移動する。
+func (e *Editorleaf) OpenMarkPositionInCurrentBuffer(mk *mark.Mark) error {
+	if utils.IsSameFile(e.GetPath(), mk.FilePath) {
+		// Set mark to Editor.mark if same the file
+		e.MoveToMarkPosition(mk)
+	} else {
+		// Change the edit buffer
+		file, _, result, err := BufferSets.GetFileAndMeta(mk.FilePath)
+		if err != nil {
+			return err
+		}
+		gecore.Echo.AddText(result.String())
+		e.OpenFile(file.GetPath())
+	}
+	e.SetRowsPos(mk.RowsPos)
+	return nil
+}
+
 // openMarkPosition prefers the workspace and RootTree recorded by the mark,
 // then uses the current workspace when the marked file is under one of its
 // directories, and finally falls back to the invoking editor.
 func (e *Editorleaf) OpenMarkPosition(mk *mark.Mark) error {
-	/* if mk == nil || mk.EditBuffer == nil {
-		return fmt.Errorf("mark has no file buffer")
-	} */
-	if mk.EditBuffer == nil && mk != nil {
-		e.OpenFile(mk.FilePath)
-		mk.EditBuffer = e.editBuffer
-	}
+	path := mk.FilePath
+	e.OpenFile(path)
 
-	path := mk.EditBuffer.GetPath()
 	originalRoot := tree.CurrentRootTree()
 	originalWorkspace := workspace.Of(originalRoot)
 	fallback := func() error {

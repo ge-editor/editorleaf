@@ -43,7 +43,7 @@ func newEditorLeaf() *Editorleaf {
 		BufferSets, err = buffer.NewBufferSets(gecore.Files)
 		if err != nil {
 			gelog.Error(err.Error())
-			gecore.Echo.AddText(err.Error()).JustNowActive(gecore.EchoRed)
+			gecore.Echo.AddText(err.Error()).WithStyle(gecore.EchoRed)
 		}
 
 		// gelog.Info("CloseGuardManager.Register", "BufferSets", BufferSets)
@@ -422,7 +422,10 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 
 	for _, a := range marks.Marks.Items() {
 		m, ok := a.(*mark.Mark)
-		if !ok || m.EditBuffer != e.editBuffer {
+		/* if !ok || m.EditBuffer != e.editBuffer {
+			continue
+		} */
+		if !ok || utils.IsSameFile(m.FilePath, e.editBuffer.GetPath()) {
 			continue
 		}
 

@@ -7,10 +7,9 @@ import (
 	"github.com/ge-editor/gecore/marks"
 	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/gecore/workspace"
-	"github.com/ge-editor/gelog"
 )
 
-func NewMark(ff *editbuffer.EditBuffer, current editbuffer.RowsPos, content string) *Mark {
+func NewMark(path string, current editbuffer.RowsPos, content string) *Mark {
 	var wsName, trName string
 	ws := workspace.Current()
 	if ws != nil {
@@ -26,8 +25,8 @@ func NewMark(ff *editbuffer.EditBuffer, current editbuffer.RowsPos, content stri
 		WorkspaceName: wsName,
 		RootTreeName:  trName,
 		ExtraData: &ExtraData{
-			EditBuffer: ff,
-			RowsPos:    current,
+			FilePath: path,
+			RowsPos:  current,
 		},
 	}
 }
@@ -51,12 +50,7 @@ func (m *Mark) GetID() string {
 	return m.id
 }
 
-func (m *Mark) UpdateExtraData() {
-	if m == nil || m.ExtraData == nil || m.EditBuffer == nil {
-		return
-	}
-	m.ExtraData.FilePath = m.EditBuffer.GetPath()
-}
+func (m *Mark) UpdateExtraData() {}
 
 func (m *Mark) GetStoredMark() (marks.StoredMark, error) {
 	if m == nil {
@@ -84,39 +78,12 @@ func (m *Mark) GetStoredMark() (marks.StoredMark, error) {
 
 // ExtraData contains editor-specific data persisted with a mark.
 type ExtraData struct {
-	EditBuffer *editbuffer.EditBuffer `json:"-"`
-	FilePath   string                 // *editbuffer.EditBuffer.GetPath()
+	FilePath string // *editbuffer.GetPath()
 	editbuffer.RowsPos
 }
 
-/* func (m *Mark) Equals(a *Mark) bool {
-	gelog.Debug("mark Equals", "m", *m, "a", *a)
-
-	if m.EditBuffer != nil && a.EditBuffer != nil {
-		if m.EditBuffer != a.EditBuffer {
-			return false
-		}
-	}
-
-	if // m.EditBuffer != a.EditBuffer ||
-	m.WorkspaceName != a.WorkspaceName ||
-		m.RootTreeName != a.RootTreeName ||
-		m.WorkspaceFilePath != a.WorkspaceFilePath ||
-		!m.RowsPos.Equals(a.RowsPos) {
-		return false
-	}
-	return true
-}
-*/
-
 func Equals(a, b *Mark) bool {
-	gelog.Debug("mark Equals", "m", *a, "a", *b)
-
-	if a.EditBuffer != nil && b.EditBuffer != nil {
-		if a.EditBuffer != b.EditBuffer {
-			return false
-		}
-	}
+	// gelog.Debug("mark Equals", "m", *a, "a", *b)
 
 	if a.WorkspaceName != b.WorkspaceName ||
 		a.RootTreeName != b.RootTreeName ||

@@ -119,7 +119,7 @@ func (qg *quitGuard) askNext() {
 				// save
 				_, err := buffSet.Save()
 				if err != nil {
-					gecore.Echo.AddText("⚠" + err.Error() + " " + base).JustNowActive(gecore.EchoRed)
+					gecore.Echo.AddText("⚠" + err.Error() + " " + base).WithStyle(gecore.EchoRed)
 				} else {
 					qg.currentIndex++
 					qg.askNext()
