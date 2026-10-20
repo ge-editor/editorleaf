@@ -9,6 +9,7 @@ import (
 	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/editorleaf/highlight"
 	"github.com/ge-editor/editorleaf/syntax"
+	"github.com/ge-editor/gecore/lang"
 )
 
 // fakeParser is a trivial Parser used to test Worker without depending on
@@ -89,12 +90,31 @@ func waitFor(t *testing.T, cond func() bool) {
 	t.Fatal("condition not met before timeout")
 }
 
-func TestAttachUnknownLanguage(t *testing.T) {
-	eb := newTestBuffer(t, "x")
-	detach, ok := syntax.Attach(eb, "no-such-language-xyz", &highlight.HighlightsLayer{}, highlight.LayerSyntax, nil)
-	if ok || detach != nil {
-		t.Fatalf("Attach for an unregistered language should fail cleanly, got ok=%v detach=%v", ok, detach)
+type fakeMode struct {
+	lang.Mode
+	name string
+}
+
+func (m fakeMode) Name() string { return m.name }
+
+func setLang(eb *editbuffer.EditBuffer, name string) {
+	var m lang.Mode = fakeMode{name: name}
+	eb.SetLangMode(&m)
+}
+
+func spanEnd(h *highlight.HighlightsLayer) int {
+	got := h.GetSpanTemplate(highlight.LayerSyntax, 0)
+	if got == nil {
+		return -1
 	}
+	return (*got).GetSpan().End.ColIndex
+}
+
+func TestSubscribeUnknownLanguage(t *testing.T) {
+	eb := newTestBuffer(t, "x")
+	setLang(eb, "no-such-language-xyz")
+	syntax.Subscribe(eb, &highlight.HighlightsLayer{}, highlight.LayerSyntax, nil)
+	syntax.Release(eb)
 }
 
 func TestWorkerParsesEditsAndPublishes(t *testing.T) {
@@ -103,14 +123,12 @@ func TestWorkerParsesEditsAndPublishes(t *testing.T) {
 	syntax.Register(lang, func() syntax.Parser { return fp })
 
 	eb := newTestBuffer(t, "abc")
+	setLang(eb, lang)
 	target := &highlight.HighlightsLayer{}
 	redrawn := make(chan struct{}, 16)
-	detach, ok := syntax.Attach(eb, lang, target, highlight.LayerSyntax,
+	syntax.Subscribe(eb, target, highlight.LayerSyntax,
 		func(apply func()) { apply(); redrawn <- struct{}{} })
-	if !ok {
-		t.Fatal("Attach failed for a registered language")
-	}
-	defer detach()
+	defer syntax.Release(eb)
 
 	// Initial priming: one Parse call, one published span covering "abc".
 	waitFor(t, func() bool { p, _, _ := fp.snapshot(); return p == 1 })
@@ -140,9 +158,9 @@ func TestWorkerParsesEditsAndPublishes(t *testing.T) {
 		t.Fatal("redraw callback was never invoked")
 	}
 
-	detach()
+	syntax.Release(eb)
 	if _, _, closed := fp.snapshot(); !closed {
-		t.Fatal("detach did not Close the parser")
+		t.Fatal("Release did not Close the parser")
 	}
 }
 
@@ -152,12 +170,10 @@ func TestWorkerDesyncClearsLayerAndStopsApplying(t *testing.T) {
 	syntax.Register(lang, func() syntax.Parser { return fp })
 
 	eb := newTestBuffer(t, "abc")
+	setLang(eb, lang)
 	target := &highlight.HighlightsLayer{}
-	detach, ok := syntax.Attach(eb, lang, target, highlight.LayerSyntax, nil)
-	if !ok {
-		t.Fatal("Attach failed")
-	}
-	defer detach()
+	syntax.Subscribe(eb, target, highlight.LayerSyntax, nil)
+	defer syntax.Release(eb)
 
 	waitFor(t, func() bool { p, _, _ := fp.snapshot(); return p == 1 })
 
@@ -186,4 +202,174 @@ func TestWorkerDesyncClearsLayerAndStopsApplying(t *testing.T) {
 	eb.SetBytesArray([][]byte{[]byte("fresh")})
 	waitFor(t, func() bool { p, _, _ := fp.snapshot(); return p == 2 })
 	waitFor(t, func() bool { return target.SpanLength(highlight.LayerSyntax) == 1 })
+}
+
+// Panes only subscribe/unsubscribe: the Worker (parser + tree) belongs to
+// the buffer and survives until Release.
+func TestSubscribeSharesOneWorkerPerBuffer(t *testing.T) {
+	const lang = "fake-test-lang-3"
+	var mu sync.Mutex
+	var parsers []*fakeParser
+	syntax.Register(lang, func() syntax.Parser {
+		mu.Lock()
+		defer mu.Unlock()
+		p := &fakeParser{}
+		parsers = append(parsers, p)
+		return p
+	})
+	parser := func(i int) *fakeParser {
+		mu.Lock()
+		defer mu.Unlock()
+		if i >= len(parsers) {
+			return nil
+		}
+		return parsers[i]
+	}
+
+	eb := newTestBuffer(t, "abc")
+	setLang(eb, lang)
+	a, b := &highlight.HighlightsLayer{}, &highlight.HighlightsLayer{}
+
+	unsubA := syntax.Subscribe(eb, a, highlight.LayerSyntax, nil)
+	defer syntax.Release(eb)
+	waitFor(t, func() bool { return a.SpanLength(highlight.LayerSyntax) == 1 })
+
+	// A second pane on the same buffer gets the current spans right away
+	// and does not create another parser.
+	unsubB := syntax.Subscribe(eb, b, highlight.LayerSyntax, nil)
+	if got := b.SpanLength(highlight.LayerSyntax); got != 1 {
+		t.Fatalf("new subscriber should receive the latest spans immediately, got %d spans", got)
+	}
+	if parser(1) != nil {
+		t.Fatal("second Subscribe created a second parser")
+	}
+
+	// Closing pane A must neither stop the Worker nor reparse.
+	unsubA()
+	if _, _, closed := parser(0).snapshot(); closed {
+		t.Fatal("unsubscribe stopped the Worker")
+	}
+	eb.InsertRegion(0, 3, editbuffer.Rows_{editbuffer.Row_("de")})
+	waitFor(t, func() bool {
+		got := b.GetSpanTemplate(highlight.LayerSyntax, 0)
+		return got != nil && (*got).GetSpan().End.ColIndex == 5
+	})
+	if got := a.GetSpanTemplate(highlight.LayerSyntax, 0); got == nil || (*got).GetSpan().End.ColIndex != 3 {
+		t.Fatal("an unsubscribed layer must not be updated any more")
+	}
+	if p, _, _ := parser(0).snapshot(); p != 1 {
+		t.Fatalf("Parse should have run once for the buffer, ran %d times", p)
+	}
+
+	// Pane B closes too: still alive (the buffer is still open). A later
+	// pane for the same buffer reuses it.
+	unsubB()
+	c := &highlight.HighlightsLayer{}
+	unsubC := syntax.Subscribe(eb, c, highlight.LayerSyntax, nil)
+	defer unsubC()
+	if parser(1) != nil {
+		t.Fatal("re-subscribing after all panes closed created a new parser")
+	}
+	if got := c.SpanLength(highlight.LayerSyntax); got != 1 {
+		t.Fatalf("expected the retained spans, got %d", got)
+	}
+
+	// Release (kill-buffer) stops the Worker; a later Subscribe starts a new one.
+	syntax.Release(eb)
+	if _, _, closed := parser(0).snapshot(); !closed {
+		t.Fatal("Release did not Close the parser")
+	}
+	d := &highlight.HighlightsLayer{}
+	setLang(eb, lang)
+	syntax.Subscribe(eb, d, highlight.LayerSyntax, nil)
+	defer syntax.Release(eb)
+	waitFor(t, func() bool { return parser(1) != nil })
+}
+
+// Meta.DeepCopy copies the HighlightLayer pointer, so two panes can register
+// the very same layer. It must be written once and stay registered until
+// both have unsubscribed.
+func TestSubscribeSharedLayerIsRefCounted(t *testing.T) {
+	const lang = "fake-test-lang-4"
+	fp := &fakeParser{}
+	syntax.Register(lang, func() syntax.Parser { return fp })
+
+	eb := newTestBuffer(t, "abc")
+	setLang(eb, lang)
+	layer := &highlight.HighlightsLayer{}
+	unsub1 := syntax.Subscribe(eb, layer, highlight.LayerSyntax, nil)
+	unsub2 := syntax.Subscribe(eb, layer, highlight.LayerSyntax, nil)
+	defer syntax.Release(eb)
+	waitFor(t, func() bool { return layer.SpanLength(highlight.LayerSyntax) == 1 })
+
+	unsub1()
+	unsub1() // idempotent: must not drop the second pane's reference
+	eb.InsertRegion(0, 3, editbuffer.Rows_{editbuffer.Row_("de")})
+	waitFor(t, func() bool {
+		got := layer.GetSpanTemplate(highlight.LayerSyntax, 0)
+		return got != nil && (*got).GetSpan().End.ColIndex == 5
+	})
+	if n := layer.SpanLength(highlight.LayerSyntax); n != 1 {
+		t.Fatalf("spans were written more than once into the shared layer: %d", n)
+	}
+	unsub2()
+}
+
+func TestSetLangModeStartsWorkerForExistingSubscription(t *testing.T) {
+	const langName = "fake-test-lang-5"
+	fp := &fakeParser{}
+	syntax.Register(langName, func() syntax.Parser { return fp })
+
+	eb := newTestBuffer(t, "abc")
+	setLang(eb, "no-such-language-xyz")
+	layer := &highlight.HighlightsLayer{}
+	syntax.Subscribe(eb, layer, highlight.LayerSyntax, nil)
+	defer syntax.Release(eb)
+
+	time.Sleep(10 * time.Millisecond)
+	if n := layer.SpanLength(highlight.LayerSyntax); n != 0 {
+		t.Fatalf("no parser is registered, but %d spans were published", n)
+	}
+
+	setLang(eb, langName)
+	waitFor(t, func() bool { return spanEnd(layer) == 3 })
+}
+
+func TestSetLangModeReplacesWorkerAndKeepsSinks(t *testing.T) {
+	const langA, langB = "fake-test-lang-6a", "fake-test-lang-6b"
+	pa, pb := &fakeParser{}, &fakeParser{}
+	syntax.Register(langA, func() syntax.Parser { return pa })
+	syntax.Register(langB, func() syntax.Parser { return pb })
+
+	eb := newTestBuffer(t, "abc")
+	setLang(eb, langA)
+	layer := &highlight.HighlightsLayer{}
+	syntax.Subscribe(eb, layer, highlight.LayerSyntax, nil)
+	defer syntax.Release(eb)
+	waitFor(t, func() bool { return spanEnd(layer) == 3 })
+
+	setLang(eb, langB)
+	if _, _, closed := pa.snapshot(); !closed {
+		t.Fatal("SetLangMode did not stop the previous language's parser")
+	}
+	waitFor(t, func() bool { p, _, _ := pb.snapshot(); return p == 1 })
+	waitFor(t, func() bool { return spanEnd(layer) == 3 })
+
+	eb.InsertRegion(0, 3, editbuffer.Rows_{editbuffer.Row_("de")})
+	waitFor(t, func() bool { _, e, _ := pb.snapshot(); return e == 1 })
+	waitFor(t, func() bool { return spanEnd(layer) == 5 })
+	if _, e, _ := pa.snapshot(); e != 0 {
+		t.Fatalf("the old parser received %d edits after SetLangMode", e)
+	}
+
+	setLang(eb, "no-such-language-xyz")
+	if _, _, closed := pb.snapshot(); !closed {
+		t.Fatal("SetLangMode did not stop the parser")
+	}
+	if n := layer.SpanLength(highlight.LayerSyntax); n != 0 {
+		t.Fatalf("stale spans remained after switching to a mode without a Parser: %d", n)
+	}
+
+	setLang(eb, langB)
+	waitFor(t, func() bool { p, _, _ := pb.snapshot(); return p >= 2 })
 }

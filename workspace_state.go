@@ -36,7 +36,7 @@ func (e *Editorleaf) UnmarshalWorkspaceData(data json.RawMessage) error {
 	if err != nil {
 		return err
 	}
-	e.editBuffer, e.meta = eb, meta
+	e.setBuffer(eb, meta)
 	e.meta.RowsPos = state.Cursor
 	return nil
 }

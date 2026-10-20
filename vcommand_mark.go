@@ -13,6 +13,7 @@ import (
 	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/gecore/workspace"
 	"github.com/ge-editor/gelog"
+	"github.com/ge-editor/theme"
 	"github.com/ge-editor/utils"
 )
 
@@ -62,12 +63,12 @@ func (e *Editorleaf) SetMarkAtCursor() {
 			continue
 		}
 
-		gecore.Echo.AddText("Unset mark")
+		gecore.Echo.AddText("Unset mark").WithStyle(theme.ColorEchoRed)
 		marks.Marks.Remove(a)
 		return
 	}
 
-	gecore.Echo.AddText("Set mark")
+	gecore.Echo.AddText("Set mark").WithStyle(theme.ColorEchoGreen)
 	marks.Marks.Add(newMark)
 }
 
@@ -86,7 +87,7 @@ var tmpMarkPos *mark.Mark
 func (e *Editorleaf) SwapCursorAndMark() {
 	lastMark := e.findLastByEditBuffer()
 	if lastMark == nil {
-		gecore.Echo.AddText("No mark set")
+		gecore.Echo.AddText("No mark set").WithStyle(theme.ColorEchoYellow)
 		return
 	}
 
@@ -96,7 +97,7 @@ func (e *Editorleaf) SwapCursorAndMark() {
 			tmpMarkPos = nil
 			return
 		}
-		gecore.Echo.AddText("Already at the last mark")
+		gecore.Echo.AddText("Already at the last mark").WithStyle(theme.ColorEchoYellow)
 		return
 	} else {
 		tmpMarkPos = mark.NewMark(e.editBuffer.GetPath(), e.meta.RowsPos, e.getContentWidthoutSpecialCharactor(e.meta.RowsPos, 20))

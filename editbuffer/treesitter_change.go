@@ -74,6 +74,40 @@ type changeListenerEntry struct {
 type changeNotifier struct {
 	nextListenerID int
 	listeners      []changeListenerEntry
+
+	langListeners []langListenerEntry // see AddLangModeListener
+}
+
+type langListenerEntry struct {
+	id int
+	fn func()
+}
+
+// AddLangModeListener registers fn, which is called after
+// EditBuffer.SetLangMode replaced the buffer's lang.Mode, and returns a
+// function that removes it. Like change listeners, it is invoked
+// synchronously on the goroutine that calls SetLangMode (the UI goroutine),
+// and AddLangModeListener / remove must be called from there too.
+func (n *changeNotifier) AddLangModeListener(fn func()) (remove func()) {
+	n.nextListenerID++
+	id := n.nextListenerID
+	n.langListeners = append(n.langListeners, langListenerEntry{id: id, fn: fn})
+
+	return func() {
+		next := make([]langListenerEntry, 0, len(n.langListeners))
+		for _, l := range n.langListeners {
+			if l.id != id {
+				next = append(next, l)
+			}
+		}
+		n.langListeners = next
+	}
+}
+
+func (n *changeNotifier) emitLangMode() {
+	for _, l := range n.langListeners {
+		l.fn()
+	}
 }
 
 // AddChangeListener registers fn and returns a function that removes it.

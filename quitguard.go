@@ -19,6 +19,7 @@ import (
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/keychord"
+	"github.com/ge-editor/theme"
 )
 
 // implements QuitGuardResolver interface
@@ -119,7 +120,7 @@ func (qg *quitGuard) askNext() {
 				// save
 				_, err := buffSet.Save()
 				if err != nil {
-					gecore.Echo.AddText("⚠" + err.Error() + " " + base).WithStyle(gecore.EchoRed)
+					gecore.Echo.AddText("⚠" + err.Error() + " " + base).WithStyle(theme.ColorEchoRed)
 				} else {
 					qg.currentIndex++
 					qg.askNext()

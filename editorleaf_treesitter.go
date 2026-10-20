@@ -5,10 +5,11 @@ import (
 
 	"github.com/gdamore/tcell/v3"
 
+	"github.com/ge-editor/editorleaf/buffer"
+	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/editorleaf/highlight"
 	"github.com/ge-editor/editorleaf/syntax"
 	"github.com/ge-editor/gecore/screen"
-	"github.com/ge-editor/gelog"
 )
 
 func (e *Editorleaf) InitTreesitter() {
@@ -16,37 +17,46 @@ func (e *Editorleaf) InitTreesitter() {
 	// was created (open-file into an existing pane, buffer switch, or a
 	// new sibling pane cloning its neighbor's buffer -- see
 	// editorleaf/vcommand2.go, editorleaf.go's buffer-set replace path,
-	// and leaftype.go's NewSiblingLeaf). Detach any previous worker
-	// first so re-calling Init for the same pane never attaches two.
+	// and leaftype.go's NewSiblingLeaf). Unsubscribe from any previous
+	// buffer first so re-calling Init for the same pane never subscribes
+	// twice. Only this pane's HighlightLayer is (un)registered; the
+	// syntax.Worker (parser + tree) belongs to the EditBuffer and is
+	// reused, so none of this reparses anything.
 	e.WillCloseTreesitter()
 
-	langMode := e.editBuffer.GetLangMode()
-	if langMode == nil || *langMode == nil {
-		return // no file / no matching lang.Mode: nothing to highlight
-	}
-
-	detach, ok := syntax.Attach(
+	e.syntaxUnsubscribe = syntax.Subscribe(
 		e.editBuffer,
-		(*langMode).Name(),
-		e.highlightLayer,
+		e.meta.HighlightLayer,
 		highlight.LayerSyntax,
 		dispatchUI,
 	)
-	if ok {
-		e.syntaxDetach = detach
-	} else {
-		// Expected for most lang.Modes today (only Go has a registered
-		// syntax.Parser); logged at Debug so it doesn't look like an
-		// error, but is visible if you're trying to figure out why a
-		// given file isn't getting syntax highlighting.
-		gelog.Debug("syntax.Attach: no Parser registered", "lang", (*langMode).Name())
-	}
 }
 
+// setBuffer is the only place that may replace e.editBuffer / e.meta.
+//
+// Everything derived from the pair must change together:
+//  1. the subscription of e.meta.HighlightLayer to the old buffer's syntax
+//     Worker is dropped BEFORE the swap (the Worker keeps running);
+//  2. the boundary cache (bsArray) belongs to the old rows;
+//  3. e.meta.HighlightLayer is subscribed to the new buffer's Worker AFTER
+//     the swap (created on first use, otherwise its current spans are
+//     installed immediately).
+//
+// Callers that need to save the old meta (PushMeta) must do so before
+// calling setBuffer. m must not be nil.
+func (e *Editorleaf) setBuffer(eb *editbuffer.EditBuffer, m *buffer.Meta) {
+	e.WillCloseTreesitter()
+	e.editBuffer, e.meta = eb, m
+	e.bsArray.ClearAll()
+	e.InitTreesitter()
+}
+
+// WillCloseTreesitter drops this pane's subscription. It does not stop the
+// buffer's Worker: that is done by syntax.Release when the buffer is killed.
 func (e *Editorleaf) WillCloseTreesitter() {
-	if e.syntaxDetach != nil {
-		e.syntaxDetach()
-		e.syntaxDetach = nil
+	if e.syntaxUnsubscribe != nil {
+		e.syntaxUnsubscribe()
+		e.syntaxUnsubscribe = nil
 	}
 }
 

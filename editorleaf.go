@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/gdamore/tcell/v3"
 
@@ -16,7 +15,6 @@ import (
 	"github.com/ge-editor/editorleaf/mark"
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/define"
-	"github.com/ge-editor/gecore/excommand"
 	"github.com/ge-editor/gecore/marks"
 	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/gecore/tree"
@@ -43,7 +41,7 @@ func newEditorLeaf() *Editorleaf {
 		BufferSets, err = buffer.NewBufferSets(gecore.Files)
 		if err != nil {
 			gelog.Error(err.Error())
-			gecore.Echo.AddText(err.Error()).WithStyle(gecore.EchoRed)
+			gecore.Echo.AddText(err.Error()).WithStyle(theme.ColorEchoRed)
 		}
 
 		// gelog.Info("CloseGuardManager.Register", "BufferSets", BufferSets)
@@ -55,8 +53,6 @@ func newEditorLeaf() *Editorleaf {
 		meta:       (*BufferSets)[0].PopMeta(),
 		mode:       ModeEditor,
 		locale:     locale.New(),
-
-		highlightLayer: &highlight.HighlightsLayer{},
 	}
 	e.bsArray = NewBoundariesArray(e)
 	e.InitTreesitter()
@@ -82,9 +78,17 @@ type Editorleaf struct {
 	editBuffer *editbuffer.EditBuffer
 	meta       *buffer.Meta
 
-	bsArray BoundariesArray // boundaries array of logical row
-
 	mode Mode
+	// treesitter
+	// syntaxUnsubscribe removes this editor's HighlightLayer from the
+	// syntax.Worker of its buffer, if InitTreesitter() subscribed to one
+	// because the buffer's lang.Mode has a registered syntax.Parser. nil
+	// otherwise. The Worker itself belongs to the EditBuffer and is
+	// stopped by syntax.Release when the buffer is removed from BufferSets.
+	// Called and cleared in WillCloseTreesitter.
+	syntaxUnsubscribe func()
+
+	bsArray BoundariesArray // boundaries array of logical row
 
 	keyDispatcher *keychord.RootNode
 
@@ -92,60 +96,6 @@ type Editorleaf struct {
 
 	locale locale.Locale // Locale interface
 
-	highlightLayer *highlight.HighlightsLayer
-
-	// treesitter
-	// syntaxDetach stops this editor's syntax.Worker, if one was
-	// attached in InitTreesitter() because the buffer's lang.Mode has a
-	// registered syntax.Parser. nil otherwise. Set in Init, called and
-	// cleared in WillCloseTreesitter.
-	syntaxDetach func()
-}
-
-func (e *Editorleaf) Commands() []excommand.ExCommand {
-	return []excommand.ExCommand{
-		&Command{
-			CommandName:        "test 2",
-			CommandDescription: "Exit the editor 2",
-			Run: func(ctx context.Context, args []string) (bool, error) {
-				// 終了処理
-				return true, nil
-			},
-		},
-
-		// ! （shell-command / M-!）
-		// ショートカット: M-! (async-shell-command は M-&)
-		// 機能: Emacsのミニバッファから直接、OSのシェルコマンドを1回きりで実行するためのコマンドです。
-		// 動作: M-! を押すとプロンプトが出るので、そこで ls -la や git status などのコマンドを入力して実行します。出力結果は専用のウィンドウ（*Shell Command Output*）に表示されます。
-		&Command{
-			CommandName:        "!",
-			CommandDescription: "Shell command",
-			Run: func(ctx context.Context, args []string) (bool, error) {
-				result, err := utils.ExecShellCommand(strings.Join(args, " "))
-				// gelog.Debug("Run shell command")
-				if err != nil {
-					gecore.Echo.AddText(err.Error())
-					return true, err
-				}
-				// gecore.Echo.AddText("result", result)
-				if result != "" {
-					e.InsertString(result)
-				}
-				return true, nil
-			},
-		},
-
-		// | （shell-command-on-region / M-|）
-		// リージョン（選択範囲）を選択した状態で
-		// 機能: バッファ内で選択した範囲（リージョン）のテキストを、外部のシェルコマンドの標準入力（stdin）として流し込むためのコマンドです。
-		&Command{
-			CommandName:        "|",
-			CommandDescription: "Shell command oneregion",
-			Run: func(ctx context.Context, args []string) (bool, error) {
-				return true, nil
-			},
-		},
-	}
 }
 
 func (e *Editorleaf) SetKeyDispatcher(km *keychord.RootNode) {
@@ -262,9 +212,10 @@ func (e *Editorleaf) Kill(leaf tree.Leaf, isActive bool) tree.Leaf {
 	}
 
 	for _, e := range toReplace {
-		e.editBuffer = (*BufferSets)[bufferSetsIndexForReplace].EditBuffer
-		e.meta = (*BufferSets)[bufferSetsIndexForReplace].PopMeta()
-		e.InitTreesitter() // re-attach syntax highlighting (if any) for the replacement buffer
+		e.setBuffer(
+			(*BufferSets)[bufferSetsIndexForReplace].EditBuffer,
+			(*BufferSets)[bufferSetsIndexForReplace].PopMeta(),
+		)
 	}
 
 	return leaf
@@ -1699,19 +1650,19 @@ func (e Editorleaf) FindHighlightSpan(
 
 	maxPriority := max(
 		e.meta.HighlightLayer.MaxPriority(),
-		e.highlightLayer.MaxPriority(),
+		e.meta.HighlightLayer.MaxPriority(),
 	)
 	// gelog.Debug("maxPriority", maxPriority)
 
 	/* for priorityIndex := maxPriority; priorityIndex >= 0; priorityIndex-- {
 
-		// e.meta.HighlightLayer と e.highlightLayer では、
+	// e.meta.HighlightLayer を使って描画する。
 		// 同一 priorityIndex において、両方が Highlights を持つことはない。
 		// 両方が Highlights を持たないことはある。
 		//
 		// Peek() を使う: Highlights() は呼ぶだけで対象スロットを
 		// &Highlights{} で自動生成してしまい、常に非 nil を返すため、
-		// 「このレイヤーには無い」を検出できず e.highlightLayer 側に
+		// 「このレイヤーには無い」を検出できず e.meta.HighlightLayer 側に
 		// フォールバックできなかった (syntax highlighting が一切
 		// 表示されない原因だった)。
 		layerIndex := highlightMeta
@@ -1719,7 +1670,7 @@ func (e Editorleaf) FindHighlightSpan(
 
 		if hl == nil {
 			layerIndex = highlightEditor
-			hl = e.highlightLayer.Peek(priorityIndex)
+			hl = e.meta.HighlightLayer.Peek(priorityIndex)
 		}
 
 		if hl == nil {
@@ -1780,7 +1731,7 @@ func (e Editorleaf) FindHighlightSpan(
 			case highlightMeta:
 				hl = e.meta.HighlightLayer.Peek(priorityIndex)
 			case highlightEditor:
-				hl = e.highlightLayer.Peek(priorityIndex)
+				hl = e.meta.HighlightLayer.Peek(priorityIndex)
 			}
 
 			if hl == nil {

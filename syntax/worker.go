@@ -11,28 +11,27 @@ import (
 	"github.com/ge-editor/editorleaf/highlight"
 )
 
-// Worker drives one Parser from EditBuffer changes and publishes the
-// resulting spans into a highlight.HighlightsLayer.
+// Worker drives one Parser from the changes of one EditBuffer and publishes
+// spans to its owning entry (see manager.go).
 //
 // Ownership and threading:
-//   - Exactly one Worker per (buffer, view) that wants syntax highlighting.
-//     See the package comment in editorleaf/editbuffer/change.go: because
-//     highlight.LayerSyntax currently lives on buffer.Meta (per view, not
-//     per EditBuffer), two panes showing the same file each get their own
-//     Worker and Parser today. If LayerSyntax moves to EditBuffer later,
-//     Attach should be called once per EditBuffer instead.
+//   - At most one Worker per EditBuffer, owned by its entry. The entry
+//     manages worker lifetime as the buffer's language mode changes.
 //   - onChange runs on the UI goroutine (it is called synchronously from
 //     EditBuffer.emit) and must never block. It only takes a short-lived
 //     mutex and appends to a slice / clones rows.Rows; it never touches
 //     the Parser.
 //   - run is the only goroutine that calls Parser.Parse/Edit/Spans and
 //     that reads/writes li and src. It never touches EditBuffer directly.
+//   - Published spans are handed to the entry by closures passed to
+//     dispatch, i.e. on the UI goroutine, never from run().
 type Worker struct {
 	eb       *editbuffer.EditBuffer
 	parser   Parser
-	target   *highlight.HighlightsLayer
-	priority int
+	out      *entry
 	dispatch func(func())
+
+	removeListener func() // unregisters onChange from eb
 
 	wake chan struct{}
 	quit chan struct{}
@@ -62,42 +61,26 @@ type Worker struct {
 	desynced bool
 }
 
-// Attach creates a Worker for eb if a Parser is registered for langName,
-// starts its goroutine, and returns a function that stops it.
-//
-// target/priority is where spans are published (typically
-// editorleaf's e.highlightLayer and highlight.LayerSyntax). dispatch is
-// called from the worker goroutine with a closure that updates the layer.
-// It must enqueue the closure on the UI goroutine and must not block.
-//
-// ok is false when langName has no registered Parser; nothing is started
-// and detach is nil.
-func Attach(
-	eb *editbuffer.EditBuffer,
-	langName string,
-	target *highlight.HighlightsLayer,
-	priority int,
-	dispatch func(func()),
-) (detach func(), ok bool) {
-	factory, ok := Lookup(langName)
-	if !ok {
-		return nil, false
-	}
-
-	w := &Worker{
-		eb:       eb,
+// newWorker builds a Worker for e's buffer. It is not running yet: the
+// caller stores it in e.worker first and then calls start.
+func newWorker(e *entry, factory Factory) *Worker {
+	return &Worker{
+		eb:       e.eb,
 		parser:   factory(),
-		target:   target,
-		priority: priority,
-		dispatch: dispatch,
+		out:      e,
+		dispatch: e.dispatch,
 		wake:     make(chan struct{}, 1),
 		quit:     make(chan struct{}),
 		done:     make(chan struct{}),
-		li:       editbuffer.NewLineIndex(*eb.Rows()),
+		li:       editbuffer.NewLineIndex(*e.eb.Rows()),
 	}
-	w.src = []byte(eb.Rows().JoinString([]byte{'\n'}))
+}
 
-	removeListener := eb.AddChangeListener(w.onChange)
+// start registers the change listener, launches the goroutine and primes
+// the parser with the current content. Call on the UI goroutine.
+func (w *Worker) start() {
+	w.src = []byte(w.eb.Rows().JoinString([]byte{'\n'}))
+	w.removeListener = w.eb.AddChangeListener(w.onChange)
 
 	go w.run()
 
@@ -108,22 +91,24 @@ func Attach(
 	// returned above, so there is no race with it.
 	w.mu.Lock()
 	w.needsReset = true
-	w.snapshot = eb.Rows().CloneRows()
+	w.snapshot = w.eb.Rows().CloneRows()
 	w.mu.Unlock()
 	w.wakeUp()
+}
 
-	return func() {
-		w.stopOnce.Do(func() {
-			removeListener()
-			w.mu.Lock()
-			if w.activeCancel != nil {
-				w.activeCancel()
-			}
-			close(w.quit)
-			w.mu.Unlock()
-		})
-		<-w.done // wait for run() to Close() the parser before returning
-	}, true
+// stop ends the worker goroutine and closes the parser. Do not call while
+// holding entry.sinkMu: run() may be inside setSpans.
+func (w *Worker) stop() {
+	w.stopOnce.Do(func() {
+		w.removeListener()
+		w.mu.Lock()
+		if w.activeCancel != nil {
+			w.activeCancel()
+		}
+		close(w.quit)
+		w.mu.Unlock()
+	})
+	<-w.done
 }
 
 func (w *Worker) wakeUp() {
@@ -390,9 +375,8 @@ func (w *Worker) applyChange(ctx context.Context, c editbuffer.Change) bool {
 	e, ok := w.li.Apply(c)
 	if !ok {
 		w.desynced = true
-		w.dispatchUI(func() {
-			clearLayer(w.target, w.priority) // avoid showing highlighting for a now-wrong tree
-		})
+		// avoid showing highlighting for a now-wrong tree
+		w.dispatchUI(func() { w.out.setSpans(w, nil) })
 		return false
 	}
 
@@ -409,24 +393,10 @@ func (w *Worker) applyChange(ctx context.Context, c editbuffer.Change) bool {
 }
 
 // publish copies the parser's current spans and schedules their installation
-// on the UI goroutine.
-//
-// HighlightsLayer.AppendSpan takes a *SpanTemplate (a pointer to the
-// interface value, not to a concrete type) -- see
-// editorleaf/highlight/highlights_layer.go. *highlight.Span implements
-// SpanTemplate directly (span.go), so each span needs its own interface
-// variable to take the address of.
+// into every sink on the UI goroutine (see setSpans).
 func (w *Worker) publish() {
 	spans := append([]highlight.Span(nil), w.parser.Spans()...)
-	w.dispatchUI(func() {
-		clearLayer(w.target, w.priority)
-		for i := range spans {
-			sp := spans[i]
-			sp.Priority = w.priority
-			var st highlight.SpanTemplate = &sp
-			w.target.Highlights(w.priority).AppendSpan(&st)
-		}
-	})
+	w.dispatchUI(func() { w.out.setSpans(w, spans) })
 }
 
 func (w *Worker) dispatchUI(fn func()) {

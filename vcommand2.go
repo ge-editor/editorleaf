@@ -32,10 +32,7 @@ func (e *Editorleaf) OpenFile(path string) (editbuffer.Result, error) {
 
 	// Open new editing content in the editor buffer
 	ff, meta, result, err := BufferSets.GetFileAndMeta(path)
-	e.editBuffer = ff
-	e.meta = meta
-	e.bsArray.ClearAll()
-	e.InitTreesitter() // re-attach syntax highlighting (if any) for the new buffer's lang.Mode
+	e.setBuffer(ff, meta)
 	return result, err
 }
 

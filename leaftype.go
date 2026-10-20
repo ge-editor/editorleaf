@@ -57,8 +57,9 @@ func (l *LeafType) NewSiblingLeaf(direction string, leaf tree.Leaf) tree.Leaf {
 
 	// Set the value of newEditor from leafEditor
 	leafEditor := leaf.(*Editorleaf)
-	newEditor.editBuffer = leafEditor.editBuffer  // same pointer
-	*newEditor.meta = *leafEditor.meta.DeepCopy() // copy value
+	// Same buffer pointer, copied meta. setBuffer also attaches the syntax
+	// Worker for that buffer (newEditorLeaf attached one for BufferSets[0]).
+	newEditor.setBuffer(leafEditor.editBuffer, leafEditor.meta.DeepCopy())
 
 	// Cast to tree.Leaf interface and return
 	var tl tree.Leaf = newEditor

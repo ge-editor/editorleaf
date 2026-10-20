@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/ge-editor/editorleaf/editbuffer"
+	"github.com/ge-editor/editorleaf/syntax"
 	"github.com/ge-editor/utils"
 )
 
@@ -140,11 +141,16 @@ func (bss *BufferSets) RemoveByBufferFile(ff *editbuffer.EditBuffer) int {
 		return -1
 	}
 
+	// The buffer is gone: stop its syntax Worker (parser + tree).
+	syntax.Release(ff)
 	*bss = slices.Delete(*bss, i, i+1)
 	return i
 }
 
 func (bss *BufferSets) RemoveByBufferIndex(index int) int {
+	if index >= 0 && index < len(*bss) {
+		syntax.Release((*bss)[index].EditBuffer)
+	}
 	*bss = slices.Delete(*bss, index, index+1)
 	return index
 }

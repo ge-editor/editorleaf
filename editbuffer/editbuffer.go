@@ -244,8 +244,12 @@ func ReadLine(r *bufio.Reader) ([]byte, NewlineType, error) {
 	}
 }
 
+// SetLangMode replaces the buffer's lang.Mode and notifies the listeners
+// registered with AddLangModeListener (the syntax package uses this to
+// switch the buffer's parser). Call it on the UI goroutine.
 func (eb *EditBuffer) SetLangMode(langMode *lang.Mode) {
 	eb.langMode = langMode
+	eb.emitLangMode()
 }
 
 func (eb *EditBuffer) GetLangMode() *lang.Mode {
