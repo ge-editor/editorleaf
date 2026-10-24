@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gelog"
 	"github.com/ge-editor/locale"
@@ -57,6 +58,15 @@ func (b *Boundary) IsEmpty() bool {
 
 // --------------------
 
+// highlightStamp records the state RuneWidthCache[].Style was computed for.
+// The zero value (valid == false) never matches, so a freshly built
+// RowLayout is always recomputed once.
+type highlightStamp struct {
+	version uint64
+	cursor  editbuffer.RowsPos // カーソル行以外は {-1,-1}
+	valid   bool
+}
+
 // RowLayout represents layout information for a single physical row.
 //
 // It contains all computed wrapping boundaries and additional
@@ -70,6 +80,9 @@ type RowLayout struct {
 	HangingIndentWidth int
 
 	RuneWidthCache []locale.Cell
+
+	// HighlightStamp is the state RuneWidthCache[].Style reflects.
+	HighlightStamp highlightStamp
 }
 
 // --------------------

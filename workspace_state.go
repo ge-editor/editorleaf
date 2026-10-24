@@ -9,7 +9,7 @@ import (
 )
 
 type workspaceEditorState struct {
-	Path   string              `json:"path"`
+	Path   string             `json:"path"`
 	Cursor editbuffer.RowsPos `json:"cursor"`
 }
 

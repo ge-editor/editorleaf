@@ -37,13 +37,21 @@ type sink struct {
 
 // install replaces the spans at s.priority with spans.
 func (s *sink) install(spans []highlight.Span) {
-	clearLayer(s.target, s.priority)
+	if len(spans) == 0 {
+		clearLayer(s.target, s.priority)
+		return
+	}
+
+	// Build the whole slice first and swap it in at once: the draw goroutine
+	// reads the layer concurrently and must never see it half filled.
+	templates := make([]*highlight.SpanTemplate, len(spans))
 	for i := range spans {
 		sp := spans[i]
 		sp.Priority = s.priority
 		var st highlight.SpanTemplate = &sp
-		s.target.Highlights(s.priority).AppendSpan(&st)
+		templates[i] = &st
 	}
+	s.target.Highlights(s.priority).SetSpans(templates)
 }
 
 // entry is the syntax state of one EditBuffer.

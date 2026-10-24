@@ -86,11 +86,15 @@ func (e *Editorleaf) SaveFile() {
 			}
 			line := (*ed.editBuffer.Rows())[ed.meta.RowsPos.RowIndex]
 			colLength := len(line)
-			if ed.meta.RowsPos.ColIndex >= colLength {
+			// if ed.meta.RowsPos.ColIndex >= colLength {
+			if ed.meta.RowsPos.ColIndex > colLength {
 				// cursor on newline or EOF
 				ed.meta.RowsPos.ColIndex = colLength - 1
 			}
-			for !utf8.RuneStart(line[ed.meta.RowsPos.ColIndex]) && ed.meta.RowsPos.ColIndex > 0 {
+			if ed.meta.RowsPos.ColIndex < 0 {
+				ed.meta.RowsPos.ColIndex = 0
+			}
+			for ed.meta.RowsPos.ColIndex > 0 && !utf8.RuneStart(line[ed.meta.RowsPos.ColIndex]) {
 				ed.meta.RowsPos.ColIndex--
 			}
 		})
@@ -458,6 +462,16 @@ func (e *Editorleaf) MoveCursorBeginningOfLine() {
 // Move cursor to the end of logical the line.
 // At the end of a logical line, the cursor should at the beginning of the next logical line. so I see...
 func (e *Editorleaf) MoveCursorEndOfLogicalLine() {
+	rows := e.editBuffer.Rows()
+	if e.meta.RowsPos.RowIndex < 0 || e.meta.RowsPos.RowIndex >= rows.Length() {
+		return
+	}
+	row := rows.Row(e.meta.RowsPos.RowIndex)
+	e.meta.RowsPos.ColIndex = clampColumnIndexToRow(
+		*row,
+		e.meta.RowsPos.ColIndex,
+	)
+
 	// What index number in logic row?
 	indexOfLogicalRow := e.bsArray.GetIndexOfLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex)
 	bo := e.bsArray.Boundary(e.meta.RowsPos.RowIndex, indexOfLogicalRow)
@@ -473,6 +487,23 @@ func (e *Editorleaf) MoveCursorEndOfLogicalLine() {
 	}
 
 	e.meta.PrevScreenPos.Col = e.meta.ScreenPos.Col
+}
+
+// clampColumnIndexToRow keeps a byte column within the row and moves it back
+// to the start of a UTF-8 rune if it points into that rune.
+func clampColumnIndexToRow(row []byte, colIndex int) int {
+	if colIndex < 0 {
+		return 0
+	}
+	if colIndex > len(row) {
+		colIndex = len(row)
+	}
+	for colIndex > 0 &&
+		colIndex < len(row) &&
+		!utf8.RuneStart(row[colIndex]) {
+		colIndex--
+	}
+	return colIndex
 }
 
 // Move cursor to the beginning of the logical row.
@@ -512,6 +543,31 @@ func (e *Editorleaf) MoveCursorBeginningOfFile() {
 	e.meta.RowsPos.ColIndex = 0
 	e.meta.ScreenPos.Row = 0
 	e.meta.ScreenPos.Col = 0
+}
+
+// moveCursorToEndOfContent puts the cursor at the end of the last row without
+// looking at where the cursor was. Use it after SetRows replaced the content:
+// the old cursor position can lie beyond the new text, and the boundary lookups
+// of the ordinary movement commands (MoveCursorEndOfLine, ...Logical...) index
+// the new layout with it and panic.
+func (e *Editorleaf) moveCursorToEndOfContent() {
+	last := e.editBuffer.Rows().Length() - 1
+	if last < 0 {
+		return
+	}
+
+	// Start at the beginning of the last row ...
+	screenRow := 0
+	for r := 0; r < last; r++ {
+		screenRow += e.bsArray.GetIndexOfLastLogicalRow(r) + 1
+	}
+	e.meta.RowsPos = editbuffer.RowsPos{RowIndex: last, ColIndex: 0}
+	e.meta.ScreenPos.Row = screenRow
+	e.meta.ScreenPos.Col = 0
+	e.meta.PrevScreenPos.Col = 0
+
+	// ... and use the ordinary end-of-line movement from there.
+	e.MoveCursorEndOfLine()
 }
 
 func (e *Editorleaf) MoveCursorEndOfFile() {
@@ -1238,12 +1294,15 @@ func (e *Editorleaf) SetRowsPos(c editbuffer.RowsPos) {
 	e.meta.RowsPos = c
 }
 
-func (e Editorleaf) SetRows(r editbuffer.Rows_) {
+func (e *Editorleaf) SetRows(r editbuffer.Rows_) {
+	gelog.Debug("SetRows", "r", r)
 	e.editBuffer.SetRows(r)
+	e.bsArray.editor = e
 
 	// 以降は、boundaries のクリア操作
 	if e.mode == ModeMinibuffer {
 		e.bsArray.ClearAll()
+		gelog.Debug("ClearAll")
 		return
 	}
 	tree.ForEachLeafAll(func(l tree.Leaf) {

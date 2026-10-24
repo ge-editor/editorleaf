@@ -42,7 +42,7 @@ func newMeta() *Meta {
 		// Mark:       nil,
 
 		Search:         &search.SearchResults{},
-		HighlightLayer: &highlight.HighlightsLayer{},
+		HighlightLayer: highlight.NewHighlightsLayer(),
 	}
 }
 

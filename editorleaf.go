@@ -5,6 +5,7 @@ package editorleaf
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/gdamore/tcell/v3"
@@ -38,7 +39,26 @@ var (
 func newEditorLeaf() *Editorleaf {
 	if BufferSets == nil {
 		var err error
-		BufferSets, err = buffer.NewBufferSets(gecore.Files)
+		// Standard input ("cat file | ge") becomes the first buffer.
+		stdinName := ""
+		if gecore.StdinRead {
+			stdinName = "*stdin*"
+		}
+		BufferSets, err = buffer.NewBufferSetsFromStdin(gecore.Files, stdinName, gecore.Stdin)
+		gecore.Stdin = nil // now held by the buffer
+
+		// "ge +LINE[:COLUMN] file" / "cat f | ge +LINE"
+		for i, pos := range gecore.FilePositions {
+			if pos.Line > 0 && BufferSets != nil {
+				BufferSets.SetStartPosition(gecore.Files[i], pos.Line, pos.Col)
+			}
+		}
+		if pos := gecore.StdinPosition; pos.Line > 0 && stdinName != "" && BufferSets != nil {
+			BufferSets.SetStartPositionByBase(stdinName, pos.Line, pos.Col)
+		}
+		if gecore.StdinErr != nil {
+			err = errors.Join(err, fmt.Errorf("reading stdin: %w", gecore.StdinErr))
+		}
 		if err != nil {
 			gelog.Error(err.Error())
 			gecore.Echo.AddText(err.Error()).WithStyle(theme.ColorEchoRed)
@@ -991,6 +1011,13 @@ func (e *Editorleaf) drawLineWithCompute(
 	}
 
 	stat := highlightPosStatus{}
+	/* stat := make(highlightPosStatus, 2)
+	for i := range stat {
+		stat[i] = make([]int, e.meta.HighlightLayer.MaxPriority()+1)
+		for j := range stat[i] {
+			stat[i][j] = -1
+		}
+	} */
 
 	// 右端から 折り返し候補を探す探索マージン
 	const rightEdgeWrapMargin = 8 // Search margin from the right edge for wrap candidates.
@@ -1000,12 +1027,29 @@ func (e *Editorleaf) drawLineWithCompute(
 	sy, sx := startScreenY, 0
 	var prevPrevCell, prevCell, currentCell locale.Cell // ★★
 
+	// Take one consistent view of the row. The draw goroutine runs
+	// concurrently with the UI goroutine that edits the buffer, and
+	// Rows().Row() returns a pointer into the live rows slice. Reading it
+	// several times (or keeping the pointer) can mix a row length from one
+	// moment with row bytes from another, which made DecodeRune fail.
+	// Copy the slice header once and derive every length from that copy.
+	rows := e.editBuffer.Rows()
+	rowsLen := rows.Length()
+	rowPtr := rows.Row(rowIndex)
+	if rowPtr == nil {
+		// The buffer shrank after the caller chose rowIndex. The edit that
+		// caused this also requests a redraw.
+		e.bsArray.ClearRow(rowIndex)
+		return -1, true // canceled
+	}
+	rowSnapshot := *rowPtr
+
 	var breakpoint Boundary
 	lines := vLines{
-		r:          e.editBuffer.Rows().Row(rowIndex),
-		rowLength:  e.editBuffer.Rows().Row(rowIndex).Length() + 1, // + LF or EOF
-		rowsLength: e.editBuffer.Rows().Length(),
-		isFinalRow: rowIndex == e.editBuffer.Rows().Length()-1,
+		r:          &rowSnapshot,
+		rowLength:  len(rowSnapshot) + 1, // + LF or EOF
+		rowsLength: rowsLen,
+		isFinalRow: rowIndex == rowsLen-1,
 	}
 	rowBytes := lines.rowLength
 	totalCellWidthForTab := 0 // for compute tab stop
@@ -1050,7 +1094,10 @@ func (e *Editorleaf) drawLineWithCompute(
 		var ok bool
 		currentCell.Ch, currentCell.Size, ok = lines.DecodeRune(bytePosOfRow)
 		if !ok {
-			panic(fmt.Sprintf("%d '%s'", rowIndex, lines.String()))
+			// Defensive: the row changed under the draw goroutine. Do not
+			// cache a bogus boundary; the edit also requests a redraw.
+			e.bsArray.ClearRow(rowIndex)
+			return -1, true // canceled
 		}
 		currentCell.Width = utils.RuneWidth(currentCell.Ch)
 		currentCell.Class = e.locale.GetCharClass(currentCell.Ch)
@@ -1077,7 +1124,7 @@ func (e *Editorleaf) drawLineWithCompute(
 			currentCell.Style = theme.ColorControlCode
 		} else {
 			// Highlight Style
-			span, _, isOnCursor := e.FindHighlightSpan(editbuffer.RowsPos{RowIndex: rowIndex, ColIndex: bytePosOfRow}, stat)
+			span, _, isOnCursor := e.FindHighlightSpan(editbuffer.RowsPos{RowIndex: rowIndex, ColIndex: bytePosOfRow}, &stat)
 			if span != nil {
 				if isOnCursor {
 					currentCell.Style = span.ColorIfActive
@@ -1413,6 +1460,24 @@ func (e *Editorleaf) drawLine(
 
 	runeWidthCache := e.bsArray.rows[rowIndex].RuneWidthCache
 
+	// Skip FindHighlightSpan when neither highlights nor the cursor changed.
+	// Cursor position only affects the row that contains the cursor.
+	cursorKey := editbuffer.RowsPos{RowIndex: -1, ColIndex: -1}
+	if rowIndex == e.meta.RowsPos.RowIndex {
+		cursorKey = e.meta.RowsPos
+	}
+	wantStamp := highlightStamp{
+		version: e.meta.HighlightLayer.Version(),
+		cursor:  cursorKey,
+		valid:   true,
+	}
+	if useLatestHighlight && e.bsArray.rows[rowIndex].HighlightStamp == wantStamp {
+		useLatestHighlight = false
+	}
+	// A partially drawn row may contain stale styles, so only stamp a fully
+	// drawn row starting at its first wrapped segment.
+	completed := false
+
 	/* ctx := e.parentLeafType.CancelManager().Get("draw")
 	if ctx == nil {
 		return -1, true
@@ -1433,7 +1498,7 @@ func (e *Editorleaf) drawLine(
 	updateHighlight := func(bytePos int) /* (isNoSpanStyle bool) */ {
 		// cell := runeWidthCache[bytePos]
 		span, _, isOnCursor := e.FindHighlightSpan(
-			editbuffer.RowsPos{RowIndex: rowIndex, ColIndex: bytePos}, stat)
+			editbuffer.RowsPos{RowIndex: rowIndex, ColIndex: bytePos}, &stat)
 		// isNoSpanStyle = true
 		style := theme.ColorDefault
 		if span != nil {
@@ -1578,7 +1643,12 @@ func (e *Editorleaf) drawLine(
 		if e.editAreaYPosition(sy) == 1 {
 			break
 		}
+		completed = logicalRowIndex == logicalRowLen-1
 	} // for
+
+	if useLatestHighlight && completed && startLogicalRowIndex == 0 {
+		e.bsArray.rows[rowIndex].HighlightStamp = wantStamp
+	}
 
 	// Line number
 	if e.mode != ModeMinibuffer {
@@ -1643,36 +1713,18 @@ func (e *Editorleaf) drawLineNumberNumber(n int, x, y int, style tcell.Style) {
 
 // HighlightsLayer の情報から描画色を決定する
 // highlightPosStatus 以降で pos と Traverse な関係にある highlights.Span を返す。
+// stat は呼び出し側の値を更新するためポインタで受け取る。
 func (e Editorleaf) FindHighlightSpan(
 	pos editbuffer.RowsPos,
-	stat highlightPosStatus,
+	stat *highlightPosStatus,
 ) (*highlight.Span, highlightPosStatus, bool) {
 
-	maxPriority := max(
-		e.meta.HighlightLayer.MaxPriority(),
-		e.meta.HighlightLayer.MaxPriority(),
-	)
-	// gelog.Debug("maxPriority", maxPriority)
+	maxPriority := e.meta.HighlightLayer.MaxPriority()
 
-	/* for priorityIndex := maxPriority; priorityIndex >= 0; priorityIndex-- {
-
-	// e.meta.HighlightLayer を使って描画する。
-		// 同一 priorityIndex において、両方が Highlights を持つことはない。
-		// 両方が Highlights を持たないことはある。
-		//
-		// Peek() を使う: Highlights() は呼ぶだけで対象スロットを
-		// &Highlights{} で自動生成してしまい、常に非 nil を返すため、
-		// 「このレイヤーには無い」を検出できず e.meta.HighlightLayer 側に
-		// フォールバックできなかった (syntax highlighting が一切
-		// 表示されない原因だった)。
-		layerIndex := highlightMeta
+	for priorityIndex := maxPriority; priorityIndex >= 0; priorityIndex-- {
+		// meta と editor は同じ HighlightsLayer を参照しているため 1 回だけ調べる。
+		const layerIndex = highlightMeta
 		hl := e.meta.HighlightLayer.Peek(priorityIndex)
-
-		if hl == nil {
-			layerIndex = highlightEditor
-			hl = e.meta.HighlightLayer.Peek(priorityIndex)
-		}
-
 		if hl == nil {
 			continue
 		}
@@ -1680,26 +1732,16 @@ func (e Editorleaf) FindHighlightSpan(
 		currentSpanIndex := stat.Get(layerIndex, priorityIndex)
 
 		// 現在位置とマッチしているか確認
-		if currentSpanIndex >= 0 &&
-			currentSpanIndex < hl.SpansLength() {
-
+		if currentSpanIndex >= 0 && currentSpanIndex < hl.SpansLength() {
 			span := hl.GetSpan(currentSpanIndex)
-
 			if highlight.PosInSpan(pos, span) {
-				isOnCursor := false
-				// カーソル位置が含まれているか
-				if highlight.PosInSpan(e.meta.RowsPos, span) {
-					isOnCursor = true
-				}
-				return span, stat, isOnCursor
+				isOnCursor := highlight.PosInSpan(e.meta.RowsPos, span)
+				return span, *stat, isOnCursor
 			}
 		}
 
 		// 現在位置から再検索
-		spanIndex := hl.MatcheFirstRegenSpanIndex(
-			pos,
-			max(0, currentSpanIndex),
-		)
+		spanIndex := hl.MatcheFirstRegenSpanIndex(pos, max(0, currentSpanIndex))
 
 		if spanIndex == -1 {
 			continue
@@ -1712,76 +1754,12 @@ func (e Editorleaf) FindHighlightSpan(
 
 		stat.Set(layerIndex, priorityIndex, spanIndex)
 
-		isOnCursor := false
-		// カーソル位置が含まれているか
-		if highlight.PosInSpan(e.meta.RowsPos, span) {
-			isOnCursor = true
-		}
-		return span, stat, isOnCursor
-	} */
+		isOnCursor := highlight.PosInSpan(e.meta.RowsPos, span)
 
-	for priorityIndex := maxPriority; priorityIndex >= 0; priorityIndex-- {
-		for _, layerIndex := range []int{
-			highlightMeta,
-			highlightEditor,
-		} {
-			var hl *highlight.Highlights
-
-			switch layerIndex {
-			case highlightMeta:
-				hl = e.meta.HighlightLayer.Peek(priorityIndex)
-			case highlightEditor:
-				hl = e.meta.HighlightLayer.Peek(priorityIndex)
-			}
-
-			if hl == nil {
-				continue
-			}
-
-			currentSpanIndex := stat.Get(layerIndex, priorityIndex)
-
-			// 現在位置とマッチしているか確認
-			if currentSpanIndex >= 0 &&
-				currentSpanIndex < hl.SpansLength() {
-
-				span := hl.GetSpan(currentSpanIndex)
-
-				if highlight.PosInSpan(pos, span) {
-					isOnCursor := false
-					if highlight.PosInSpan(e.meta.RowsPos, span) {
-						isOnCursor = true
-					}
-					return span, stat, isOnCursor
-				}
-			}
-
-			// 現在位置から再検索
-			spanIndex := hl.MatcheFirstRegenSpanIndex(
-				pos,
-				max(0, currentSpanIndex),
-			)
-
-			if spanIndex == -1 {
-				continue
-			}
-
-			span := hl.GetSpan(spanIndex)
-			if span == nil {
-				continue
-			}
-
-			stat.Set(layerIndex, priorityIndex, spanIndex)
-
-			isOnCursor := false
-			if highlight.PosInSpan(e.meta.RowsPos, span) {
-				isOnCursor = true
-			}
-
-			return span, stat, isOnCursor
-		}
+		return span, *stat, isOnCursor
 	}
 
-	return nil, stat, false
+	return nil, *stat, false
 }
 
 func cacheCellInfo(

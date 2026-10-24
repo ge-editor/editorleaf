@@ -102,6 +102,17 @@ func (m *MinibufferManagerStruct) SetString(content string) {
 	m.SetBytes([]byte(content))
 }
 
+// SetStringAtEnd replaces the content with content and puts the cursor at its
+// end. Unlike SetString followed by a cursor movement command, it is safe when
+// the new content is shorter than the old cursor position.
+func (m *MinibufferManagerStruct) SetStringAtEnd(content string) {
+	m.SetString(content)
+	if m.session == nil {
+		return
+	}
+	m.session.Editor.moveCursorToEndOfContent()
+}
+
 func (m *MinibufferManagerStruct) SetBytes(content []byte) {
 	if m.session == nil {
 		return

@@ -143,7 +143,13 @@ func (eb *EditBuffer) Load() error {
 	}
 	defer fp.Close()
 
-	reader := bufio.NewReader(fp)
+	return eb.LoadFrom(fp)
+}
+
+// LoadFrom replaces the content with everything read from r and detects the
+// newline type, exactly like Load does for the file.
+func (eb *EditBuffer) LoadFrom(r io.Reader) error {
+	reader := bufio.NewReader(r)
 
 	eb.rows = NewRowsType()
 	var countLF, countCRLF, countCR int
