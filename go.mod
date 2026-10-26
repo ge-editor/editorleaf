@@ -5,12 +5,12 @@ go 1.26.0
 require (
 	github.com/atotto/clipboard v0.1.4
 	github.com/gdamore/tcell/v3 v3.6.0
-	github.com/ge-editor/gecore v0.1.16
-	github.com/ge-editor/gelog v0.1.15
-	github.com/ge-editor/keychord v0.1.16
+	github.com/ge-editor/gecore v0.1.17
+	github.com/ge-editor/gelog v0.1.17
+	github.com/ge-editor/keychord v0.1.17
 	github.com/ge-editor/locale v0.1.16
 	github.com/ge-editor/theme v0.1.16
-	github.com/ge-editor/utils v0.1.16
+	github.com/ge-editor/utils v0.1.17
 )
 
 require (
