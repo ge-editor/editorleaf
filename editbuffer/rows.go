@@ -3,8 +3,6 @@ package editbuffer
 import (
 	"slices"
 	"strings"
-
-	"github.com/ge-editor/utils"
 )
 
 type Rows_ []Row_
@@ -44,7 +42,7 @@ func (rs Rows_) CloneRows() Rows_ {
 	return cloned
 }
 
-func (rs Rows_) Reversed() Rows_ {
+/* func (rs Rows_) Reversed() Rows_ {
 	result := make(Rows_, len(rs))
 
 	for i := range rs {
@@ -52,7 +50,7 @@ func (rs Rows_) Reversed() Rows_ {
 	}
 
 	return result
-}
+} */
 
 // setBytesArray replaces the current rows from [][]byte.
 // Line separators are removed from each row.

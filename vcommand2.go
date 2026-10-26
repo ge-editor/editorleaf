@@ -44,8 +44,11 @@ func (e *Editorleaf) adjustFormattedCursorPosition() {
 
 	row := rows.Row(e.meta.RowsPos.RowIndex)
 	i := e.meta.RowsPos.ColIndex
-	if i >= row.Length() {
+	/* if i >= row.Length() {
 		i = row.Length() - 1
+	} */
+	if i > row.Length() {
+		i = row.Length()
 	}
 	for i > 0 {
 		if _, _, ok := row.DecodeRune(i); ok {
@@ -998,7 +1001,8 @@ func (e *Editorleaf) killRegion(start, stop editbuffer.RowsPos) {
 			return
 		}
 		ed.bsArray.ClearRow(start.RowIndex)
-		ed.bsArray.Delete(start.RowIndex+1, stop.RowIndex+1)
+		// ed.bsArray.Delete(start.RowIndex+1, stop.RowIndex+1)
+		ed.bsArray.Delete(start.RowIndex+1, stop.RowIndex-start.RowIndex)
 	})
 
 	e.syncCursorAndBufferForEdit(DELETE, start, stop)
@@ -1074,7 +1078,7 @@ func (e *Editorleaf) Undo() {
 
 		switch a.Class {
 		case editbuffer.INSERT:
-			// gelog.Debug("Undo INSERT", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
+			gelog.Debug("Undo INSERT", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
 
 			e.editBuffer.RemoveRegion(a.Before, a.After)
 			e.syncCursorAndBufferForEdit(
@@ -1110,24 +1114,41 @@ func (e *Editorleaf) Undo() {
 
 			e.meta.RowsPos = a.Before
 
+			/*
+				case editbuffer.DELETE_BACKWARD:
+					gelog.Debug("Undo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
+
+					// 2026-10-03 Crash 修正
+					e.meta.RowsPos = a.After // (2. の統一後。start 側)
+					e.insertRows(a.Data, false)
+					e.syncCursorAndBufferForEdit(
+						INSERT,
+						a.After,
+						a.Before,
+					)
+
+					// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
+					// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
+					e.rebuildBufferState(a.After, a.Before, editbuffer.INSERT)
+
+					// 2026-10-03 Crash 修正
+					// e.meta.RowsPos = a.After */
+
 		case editbuffer.DELETE_BACKWARD:
 			gelog.Debug("Undo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
-
-			// 2026-10-03 Crash 修正
-			e.meta.RowsPos = a.After // (2. の統一後。start 側)
-			e.insertRows(a.Data, false)
-			e.syncCursorAndBufferForEdit(
-				INSERT,
-				a.After,
-				a.Before,
+			// insertRows は内部でカーソル移動・bsArray.Insert・sync を行うので使わない
+			e.editBuffer.InsertRegion(
+				a.After.RowIndex,
+				a.After.ColIndex,
+				a.Data,
 			)
 
-			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
-			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
+			e.syncCursorAndBufferForEdit(INSERT, a.After, a.Before)
 			e.rebuildBufferState(a.After, a.Before, editbuffer.INSERT)
 
-			// 2026-10-03 Crash 修正
-			// e.meta.RowsPos = a.After
+			// バックスペース前のカーソル位置(= 削除範囲の末尾)に戻す。
+			// sync で調整された後に明示的に設定する。
+			e.meta.RowsPos = a.Before
 
 		default:
 			return
@@ -1170,7 +1191,7 @@ func (e *Editorleaf) Redo() {
 
 			e.meta.RowsPos = a.After
 
-		case editbuffer.DELETE_BACKWARD:
+			/* case editbuffer.DELETE_BACKWARD:
 			gelog.Debug("Redo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
 
 			e.meta.RowsPos = a.Before
@@ -1191,10 +1212,21 @@ func (e *Editorleaf) Redo() {
 			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
 			e.rebuildBufferState(a.Before, a.After, editbuffer.DELETE)
 
+			e.meta.RowsPos = a.Before */
+
+		case editbuffer.DELETE_BACKWARD:
+			gelog.Debug("Redo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
 			e.meta.RowsPos = a.Before
+			e.editBuffer.RemoveRegion(a.After, a.Before)
+			e.syncCursorAndBufferForEdit(DELETE, a.After, a.Before)
+
+			// before=start(After), after=end(Before) の順にする
+			e.rebuildBufferState(a.After, a.Before, editbuffer.DELETE)
+
+			e.meta.RowsPos = a.After // a.Before ではない
 
 		case editbuffer.DELETE:
-			// gelog.Debug("Redo DELETE", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.String([]byte{'\n'}))
+			gelog.Debug("Redo DELETE", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
 
 			cursor := e.cursorAfterDelete(a)
 
@@ -1220,22 +1252,6 @@ func (e *Editorleaf) Redo() {
 
 	}
 }
-
-// 2026-10-03 Crash 修正
-/* func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) editbuffer.RowsPos {
-	cursor := a.Before
-
-	if len(a.Data) == 0 {
-		return cursor
-	}
-
-	last := a.Data[len(a.Data)-1]
-
-	cursor.RowIndex += len(a.Data) - 1
-	cursor.ColIndex += len(last)
-
-	return cursor
-} */
 
 // 2026-10-03 Crash 修正
 func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) editbuffer.RowsPos {

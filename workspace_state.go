@@ -38,5 +38,6 @@ func (e *Editorleaf) UnmarshalWorkspaceData(data json.RawMessage) error {
 	}
 	e.setBuffer(eb, meta)
 	e.meta.RowsPos = state.Cursor
+	e.meta.ClampRowsPos(eb)
 	return nil
 }

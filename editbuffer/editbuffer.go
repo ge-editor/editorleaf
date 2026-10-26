@@ -121,10 +121,11 @@ func (eb *EditBuffer) Rows() *Rows_ {
 	return eb.rows
 }
 
-func (eb *EditBuffer) ChangePath(path string) {
+/* func (eb *EditBuffer) ChangePath(path string) {
 	eb.rawPath = path
 	eb.init()
 }
+*/
 
 // New file
 func (eb *EditBuffer) New() error {
@@ -346,9 +347,9 @@ func (eb *EditBuffer) GetDispPath() string {
 	return eb.dispPath
 }
 
-func (eb *EditBuffer) GetClass() string {
+/* func (eb *EditBuffer) GetClass() string {
 	return eb.ext
-}
+} */
 
 func (eb *EditBuffer) GetEncoding() string {
 	return eb.encoding

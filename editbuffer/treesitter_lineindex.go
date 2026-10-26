@@ -79,9 +79,9 @@ func (li *LineIndex) Point(off int) Point {
 	return Point{Row: row, Column: off - li.starts[row]}
 }
 
-func (li *LineIndex) clone() *LineIndex {
+/* func (li *LineIndex) clone() *LineIndex {
 	return &LineIndex{starts: slices.Clone(li.starts), size: li.size}
-}
+} */
 
 // rowLen returns the byte length of row (without the newline).
 func (li *LineIndex) rowLen(row int) int {

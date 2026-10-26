@@ -19,6 +19,7 @@ import (
 
 func (e *Editorleaf) MoveToMarkPosition(m *mark.Mark) {
 	e.meta.RowsPos = m.RowsPos
+	e.meta.ClampRowsPos(e.editBuffer)
 }
 
 func toEditorMark(a marks.Mark) *mark.Mark {
@@ -35,6 +36,7 @@ func toEditorMark(a marks.Mark) *mark.Mark {
 		}
 
 		return &mark.Mark{
+			ID:                v.ID,
 			Label:             v.Label,
 			WorkspaceName:     v.WorkspaceName,
 			RootTreeName:      v.RootTreeName,

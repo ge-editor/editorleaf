@@ -251,6 +251,33 @@ func (b *BoundariesArray) NeedsCompute(rowIndex int) bool {
 	if b == nil {
 		return true
 	}
+	ed := b.editor
+	if ed == nil {
+		s := "NeedsCompute: b.editor is nil"
+		gelog.Error(s)
+		panic(s)
+	}
+	if ed.editBuffer == nil {
+		s := "NeedsCompute: editBuffer is nil"
+		gelog.Error(s)
+		panic(s)
+	}
+	rows := ed.editBuffer.Rows()
+	if rows == nil {
+		s := "NeedsCompute: Rows() is nil (buffer not loaded?)"
+		gelog.Error(s)
+		panic(s)
+	}
+	if rowIndex < 0 || rowIndex >= len(b.rows) {
+		return true
+	}
+	r := rows.Row(rowIndex)
+	if r == nil {
+		s := fmt.Sprintf("NeedsCompute: row nil: rowIndex=%d rows=%d cache=%d",
+			rowIndex, rows.Length(), len(b.rows))
+		gelog.Error(s)
+		panic(s)
+	}
 
 	if rowIndex < 0 || rowIndex >= len(b.rows) {
 		return true
@@ -302,7 +329,7 @@ func (b *BoundariesArray) GetIndexOfLastLogicalRow(rowIndex int) int {
 }
 
 // Returns the screen position of the cursor corresponding from cached array to the specified column index in logical rows.
-func (b *BoundariesArray) CursorPositionOnScreenLogicalRow(rowIndex, colIndex int) (lx, ly int) {
+func (b *BoundariesArray) CursorPositionOnScreenLogicalRow(rowIndex, colIndex int) (lx, ly int, err error) {
 	b.ensureLayoutComputed(rowIndex)
 
 	// 範囲外アクセス
@@ -312,16 +339,13 @@ func (b *BoundariesArray) CursorPositionOnScreenLogicalRow(rowIndex, colIndex in
 		colIndex < 0 ||
 		colIndex >= len(b.rows[rowIndex].RuneWidthCache) {
 
-		// 呼び出し元情報 + 指定インデックス + 実際の配列長を一緒に出力
-		err := fmt.Errorf("[INVALID INDEX] Called from %s | Target: [rowIndex:%d, colIndex:%d] | Actual limits: [rowsLen:%d, cacheLen:%d]", gelog.CallerInfo(2), rowIndex, colIndex, len(b.rows), len(b.rows[rowIndex].RuneWidthCache))
-		gelog.Error(err.Error())
-		gecore.Echo.AddText(err.Error())
-		// return 0, 0 // 適切なエラー処理または初期値を返す
-		panic(err)
+		// 指定インデックス + 実際の配列長
+		err = fmt.Errorf("[INVALID INDEX] Target: [rowIndex:%d, colIndex:%d] | Actual limits: [rowsLen:%d, cacheLen:%d]", rowIndex, colIndex, len(b.rows), len(b.rows[rowIndex].RuneWidthCache))
+		return
 	}
 
 	cell := b.rows[rowIndex].RuneWidthCache[colIndex]
-	return cell.TotalWidthLogicalRow, cell.LogicalRowIndex
+	return cell.TotalWidthLogicalRow, cell.LogicalRowIndex, nil
 }
 
 func (b *BoundariesArray) GetIndexOfLogicalRow(rowIndex, colIndex int) int {

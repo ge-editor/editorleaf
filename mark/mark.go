@@ -33,7 +33,7 @@ func NewMark(path string, current editbuffer.RowsPos, content string) *Mark {
 
 // implements gecore.marks.Mark interface
 type Mark struct {
-	id                string
+	ID                string
 	Label             string
 	WorkspaceName     string
 	RootTreeName      string
@@ -43,11 +43,11 @@ type Mark struct {
 }
 
 func (m *Mark) SetID(id string) {
-	m.id = id
+	m.ID = id
 }
 
 func (m *Mark) GetID() string {
-	return m.id
+	return m.ID
 }
 
 func (m *Mark) UpdateExtraData() {}
@@ -67,7 +67,7 @@ func (m *Mark) GetStoredMark() (marks.StoredMark, error) {
 	}
 
 	return marks.StoredMark{
-		ID:                m.id,
+		ID:                m.ID,
 		Label:             m.Label,
 		WorkspaceName:     m.WorkspaceName,
 		RootTreeName:      m.RootTreeName,

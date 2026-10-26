@@ -505,7 +505,11 @@ func (e *Editorleaf) moveCursor(x, y int) {
 
 // Use Editor.editArea as relative coordinates
 func (e *Editorleaf) drawCursorAt(x, y int) {
-	_, iy := e.bsArray.CursorPositionOnScreenLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex)
+	_, iy, err := e.bsArray.CursorPositionOnScreenLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex)
+	if err != nil {
+		gecore.Echo.AddText(err.Error())
+		e.meta.ClampRowsPos(e.editBuffer)
+	}
 
 	hangingIndentWidth := 0
 	if iy > 0 {
@@ -641,11 +645,12 @@ func (e *Editorleaf) drawRightBar() {
 
 // Draw the screen based on Editor.currentRowIndex, logical row position logicalCY, and cursor position Editor.Cy
 func (e *Editorleaf) drawEditorleaf(ctx context.Context) bool {
-
 	// 不整合が無いかチェック
-	/* if e.bsArray.Editor() != e {
-		panic("e.bsArray.Editor() != e")
-	} */
+	/*
+		if e.bsArray.Editor() != e {
+			panic("e.bsArray.Editor() != e")
+		}
+	*/
 
 	if e.mode == ModeEditor {
 		lineNumberWidth := digitsScreenWidth(e.RowsLength()) + 1
@@ -670,11 +675,15 @@ func (e *Editorleaf) drawEditorleaf(ctx context.Context) bool {
 		if canceled {
 			return true
 		}
-	} else {
-		gelog.Debug("not call compute")
-		// gecore.Echo.AddText("not call compute")
+		/* } else {
+		gelog.Debug("not call compute") */
 	}
-	Lcx, Lcy := e.bsArray.CursorPositionOnScreenLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex)
+	Lcx, Lcy, err := e.bsArray.CursorPositionOnScreenLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex)
+	if err != nil {
+		gecore.Echo.AddText(err.Error())
+		e.meta.ClampRowsPos(e.editBuffer)
+		_, Cy = e.meta.ScreenPos.Col, e.meta.ScreenPos.Row // ...
+	}
 	// 更新前の meta.Cursor を保存しておいて 進める必要がある。
 	// gecore.Echo.AddText(fmt.Sprintf("(Lcy,Lcx:%d,%d)", Lcy, Lcx))
 
@@ -877,6 +886,8 @@ func (e *Editorleaf) drawEditorleaf(ctx context.Context) bool {
 
 // 10進数で何桁か
 func digitsScreenWidth(n int) int {
+	const minLineNumberCount = 4
+
 	if n == 0 {
 		return 1
 	}
@@ -887,6 +898,10 @@ func digitsScreenWidth(n int) int {
 	for n > 0 {
 		n /= 10
 		count++
+	}
+
+	if count < minLineNumberCount {
+		count = minLineNumberCount
 	}
 	return count
 }

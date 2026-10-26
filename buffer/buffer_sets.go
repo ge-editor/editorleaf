@@ -167,6 +167,34 @@ func (bss *BufferSets) GetFileAndMeta(filePath string) (*editbuffer.EditBuffer, 
 
 	for _, buffSet := range *bss {
 		if utils.IsSameFile(filePath, buffSet.GetPath()) {
+			meta := buffSet.PopMeta()
+			meta.ClampRowsPos(buffSet.EditBuffer)
+			return buffSet.EditBuffer, meta, result, nil
+		}
+	}
+
+	buffSet := newBufferSet(filePath)
+	err := buffSet.Load()
+	if err != nil {
+		if err = buffSet.New(); err != nil {
+			return buffSet.EditBuffer, buffSet.PopMeta(), result, err
+		}
+		result = editbuffer.ResultNewFile
+	} else {
+		result = editbuffer.ResultLoadedFile
+	}
+	bss.Append(buffSet)
+
+	meta := buffSet.PopMeta()
+	meta.ClampRowsPos(buffSet.EditBuffer)
+	return buffSet.EditBuffer, meta, result, err
+}
+
+/* func (bss *BufferSets) GetFileAndMeta(filePath string) (*editbuffer.EditBuffer, *Meta, editbuffer.Result, error) {
+	result := editbuffer.ResultNone
+
+	for _, buffSet := range *bss {
+		if utils.IsSameFile(filePath, buffSet.GetPath()) {
 			return buffSet.EditBuffer, buffSet.PopMeta(), result, nil
 		}
 	}
@@ -183,6 +211,31 @@ func (bss *BufferSets) GetFileAndMeta(filePath string) (*editbuffer.EditBuffer, 
 	}
 	bss.Append(buffSet)
 	return buffSet.EditBuffer, buffSet.PopMeta(), result, err
+} */
+
+// ClampRowsPos adjusts RowsPos so that it points inside the current rows.
+// RowIndex is limited to the last row, and ColIndex to the end of that row
+// and moved back to the start of a UTF-8 character.
+func (m *Meta) ClampRowsPos(eb *editbuffer.EditBuffer) {
+	rows := eb.Rows()
+
+	n := rows.Length()
+	if n == 0 {
+		m.RowsPos = editbuffer.RowsPos{}
+		return
+	}
+
+	pos := &m.RowsPos
+	pos.RowIndex = min(max(pos.RowIndex, 0), n-1)
+
+	row := rows.Row(pos.RowIndex).Bytes()
+	pos.ColIndex = min(max(pos.ColIndex, 0), len(row))
+
+	// Do not stop in the middle of a multibyte character.
+	// ColIndex == len(row) is the end-of-line position and is left as it is.
+	for pos.ColIndex > 0 && pos.ColIndex < len(row) && !utf8.RuneStart(row[pos.ColIndex]) {
+		pos.ColIndex--
+	}
 }
 
 func (bss *BufferSets) Append(buffSet *bufferSet) {
@@ -215,13 +268,13 @@ func (bss *BufferSets) RemoveByBufferFile(ff *editbuffer.EditBuffer) int {
 	return i
 }
 
-func (bss *BufferSets) RemoveByBufferIndex(index int) int {
+/* func (bss *BufferSets) RemoveByBufferIndex(index int) int {
 	if index >= 0 && index < len(*bss) {
 		syntax.Release((*bss)[index].EditBuffer)
 	}
 	*bss = slices.Delete(*bss, index, index+1)
 	return index
-}
+} */
 
 // Check if the specified *editbuffer.File exists in BufferSets
 // If found, return its index
