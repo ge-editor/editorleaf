@@ -132,7 +132,11 @@ func (e *Editorleaf) DispatchKey(ev tcell.EventKey) (string, keychord.KeyDispatc
 	s, res := e.keyDispatcher.Dispatch(ev)
 	switch res {
 	case keychord.DispatchNotFound:
-		e.InsertString(ev.Str())
+		// An unbound Ctrl/Alt/Meta combination is not text: do not insert
+		// its character (Alt+Enter must not type "m").
+		if ev.Modifiers()&(tcell.ModCtrl|tcell.ModAlt|tcell.ModMeta) == 0 {
+			e.InsertString(ev.Str())
+		}
 	case keychord.DispatchPrefix:
 	case keychord.DispatchExecuted:
 	case keychord.DispatchInvalidAfterPrefix:
