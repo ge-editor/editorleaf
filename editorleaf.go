@@ -214,6 +214,11 @@ func (e *Editorleaf) Kill(leaf tree.Leaf, isActive bool) tree.Leaf {
 		}
 	})
 
+	// Save the cursor position of the file being closed.
+	if BufferSets.BufferSet(killTargetBuf) != nil {
+		saveStateIfFile(killTargetBuf.GetPath(), e.meta.RowsPos)
+	}
+
 	// 該当するバッファを取り除く
 	BufferSets.RemoveByBufferFile(killTargetBuf)
 
@@ -1120,7 +1125,7 @@ func (e *Editorleaf) drawLineWithCompute(
 		// Highlight Style
 		isNoSpanStyle := true
 		// Special char width
-		if currentCell.Ch == define.EOF && isLastCh && lines.isFinalRow {
+		if /* currentCell.Ch == define.EOF && */ isLastCh && lines.isFinalRow {
 			currentCell.Class = locale.EOF
 			currentCell.Ch = theme.MarkEOF
 			currentCell.Width = 1 // End of file

@@ -76,9 +76,11 @@ func findMetaInTree(killTargetBuf *editbuffer.EditBuffer) *buffer.Meta {
 	tree.ForEachLeafAll(func(l tree.Leaf) {
 		e, ok := l.(*Editorleaf)
 		if ok {
-			if e.editBuffer == killTargetBuf {
-				meta = BufferSets.GetMeta(e.editBuffer)
-				return
+			// Use the meta the leaf is actually using. BufferSets.GetMeta
+			// pops the buffer's stack, which is empty while a leaf shows
+			// the buffer, and would give a new meta (position 0:0).
+			if meta == nil && e.editBuffer == killTargetBuf {
+				meta = e.meta
 			}
 		}
 	})
@@ -98,10 +100,16 @@ func (qg *quitGuard) askNext() {
 	// Saves the state of the first editorleaf found in the tree.
 	meta := findMetaInTree(buffSet.EditBuffer)
 	if meta == nil {
-		// Use the popped first meta if not found in the tree.
-		meta = buffSet.PopMeta()
+		// Not shown in the tree: use the last stacked meta without
+		// popping it. With no meta there is no position to save; do not
+		// overwrite the saved one with 0:0.
+		if ms := buffSet.GetMetas(); len(ms) > 0 {
+			meta = ms[len(ms)-1]
+		}
 	}
-	saveState(buffSet.GetPath(), meta.RowsPos)
+	if meta != nil {
+		saveStateIfFile(buffSet.GetPath(), meta.RowsPos)
+	}
 
 	if !buffSet.IsDirtyFlag() {
 		qg.currentIndex++

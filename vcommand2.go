@@ -753,17 +753,26 @@ func (e *Editorleaf) DeleteRuneBackward() {
 	e.meta.RowsPos = start
 	e.meta.PrevScreenPos.Col = start.ColIndex
 
+	// Release Boundaries
+	// The minibuffer does not belong to the tree, so clear the boundary here.
 	count := stop.RowIndex - start.RowIndex
-	tree.ForEachLeafAll(func(l tree.Leaf) {
-		ed, ok := l.(*Editorleaf)
-		if !ok {
-			return
-		}
-		ed.bsArray.ClearRow(start.RowIndex)
+	if e.mode == ModeMinibuffer {
+		e.bsArray.ClearRow(start.RowIndex)
 		if count > 0 {
-			ed.bsArray.Delete(start.RowIndex+1, count)
+			e.bsArray.Delete(start.RowIndex+1, count)
 		}
-	})
+	} else {
+		tree.ForEachLeafAll(func(l tree.Leaf) {
+			ed, ok := l.(*Editorleaf)
+			if !ok {
+				return
+			}
+			ed.bsArray.ClearRow(start.RowIndex)
+			if count > 0 {
+				ed.bsArray.Delete(start.RowIndex+1, count)
+			}
+		})
+	}
 
 	e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{
 		Class:  editbuffer.DELETE_BACKWARD,
@@ -796,17 +805,26 @@ func (e *Editorleaf) DeleteRune() {
 
 	e.meta.PrevScreenPos.Col = start.ColIndex
 
+	// Release Boundaries
+	// The minibuffer does not belong to the tree, so clear the boundary here.
 	count := stop.RowIndex - start.RowIndex
-	tree.ForEachLeafAll(func(l tree.Leaf) {
-		ed, ok := l.(*Editorleaf)
-		if !ok {
-			return
-		}
-		ed.bsArray.ClearRow(start.RowIndex)
+	if e.mode == ModeMinibuffer {
+		e.bsArray.ClearRow(start.RowIndex)
 		if count > 0 {
-			ed.bsArray.Delete(start.RowIndex+1, count)
+			e.bsArray.Delete(start.RowIndex+1, count)
 		}
-	})
+	} else {
+		tree.ForEachLeafAll(func(l tree.Leaf) {
+			ed, ok := l.(*Editorleaf)
+			if !ok {
+				return
+			}
+			ed.bsArray.ClearRow(start.RowIndex)
+			if count > 0 {
+				ed.bsArray.Delete(start.RowIndex+1, count)
+			}
+		})
+	}
 
 	e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{Class: editbuffer.DELETE, Before: start, After: start, Data: removed}, true)
 	e.syncCursorAndBufferForEdit(DELETE, stop, start)
@@ -835,7 +853,7 @@ func (e *Editorleaf) Autoindent() {
 
 // unix-line-discard
 // backward-kill-line
-func (e Editorleaf) BackwardKillLine() {
+func (e *Editorleaf) BackwardKillLine() {
 	if e.meta.RowsPos.ColIndex == 0 {
 		return
 	}
@@ -853,13 +871,19 @@ func (e Editorleaf) BackwardKillLine() {
 		return
 	}
 
-	tree.ForEachLeafAll(func(l tree.Leaf) {
-		ed, ok := l.(*Editorleaf)
-		if !ok {
-			return
-		}
-		ed.bsArray.ClearRow(e.meta.RowsPos.RowIndex)
-	})
+	// Release Boundaries
+	// The minibuffer does not belong to the tree, so clear the boundary here.
+	if e.mode == ModeMinibuffer {
+		e.bsArray.ClearRow(e.meta.RowsPos.RowIndex)
+	} else {
+		tree.ForEachLeafAll(func(l tree.Leaf) {
+			ed, ok := l.(*Editorleaf)
+			if !ok {
+				return
+			}
+			ed.bsArray.ClearRow(e.meta.RowsPos.RowIndex)
+		})
+	}
 
 	e.syncCursorAndBufferForEdit(DELETE, start, e.meta.RowsPos)
 
@@ -902,13 +926,19 @@ func (e *Editorleaf) KillLine() {
 
 	e.meta.PrevScreenPos.Col = e.meta.RowsPos.ColIndex
 
-	tree.ForEachLeafAll(func(l tree.Leaf) {
-		ed, ok := l.(*Editorleaf)
-		if !ok {
-			return
-		}
-		ed.bsArray.ClearRow(e.meta.RowsPos.RowIndex)
-	})
+	// Release Boundaries
+	// The minibuffer does not belong to the tree, so clear the boundary here.
+	if e.mode == ModeMinibuffer {
+		e.bsArray.ClearRow(e.meta.RowsPos.RowIndex)
+	} else {
+		tree.ForEachLeafAll(func(l tree.Leaf) {
+			ed, ok := l.(*Editorleaf)
+			if !ok {
+				return
+			}
+			ed.bsArray.ClearRow(e.meta.RowsPos.RowIndex)
+		})
+	}
 
 	e.syncCursorAndBufferForEdit(DELETE, e.meta.RowsPos, stop)
 	e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{
@@ -993,17 +1023,22 @@ func (e *Editorleaf) killRegion(start, stop editbuffer.RowsPos) {
 	if removed == nil {
 		return
 	}
-	// gelog.Debug("killRegion", "removed", removed.String([]byte{'\n'}))
 
-	tree.ForEachLeafAll(func(l tree.Leaf) {
-		ed, ok := l.(*Editorleaf)
-		if !ok {
-			return
-		}
-		ed.bsArray.ClearRow(start.RowIndex)
-		// ed.bsArray.Delete(start.RowIndex+1, stop.RowIndex+1)
-		ed.bsArray.Delete(start.RowIndex+1, stop.RowIndex-start.RowIndex)
-	})
+	// Release Boundaries
+	// The minibuffer does not belong to the tree, so clear the boundary here.
+	if e.mode == ModeMinibuffer {
+		e.bsArray.ClearRow(start.RowIndex)
+		e.bsArray.Delete(start.RowIndex+1, stop.RowIndex-start.RowIndex)
+	} else {
+		tree.ForEachLeafAll(func(l tree.Leaf) {
+			ed, ok := l.(*Editorleaf)
+			if !ok {
+				return
+			}
+			ed.bsArray.ClearRow(start.RowIndex)
+			ed.bsArray.Delete(start.RowIndex+1, stop.RowIndex-start.RowIndex)
+		})
+	}
 
 	e.syncCursorAndBufferForEdit(DELETE, start, stop)
 	e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{
@@ -1281,9 +1316,6 @@ func (e *Editorleaf) rebuildBufferState(before, after editbuffer.RowsPos, class 
 			return
 		}
 
-		// ed.bsArray.ClearAll()
-		// return
-
 		var start int
 		count := after.RowIndex - before.RowIndex
 		if before.ColIndex == 0 && after.ColIndex == 0 { // 行単位
@@ -1315,22 +1347,22 @@ func (e *Editorleaf) SetRows(r editbuffer.Rows_) {
 	e.editBuffer.SetRows(r)
 	e.bsArray.editor = e
 
-	// 以降は、boundaries のクリア操作
+	// Release Boundaries
+	// The minibuffer does not belong to the tree, so clear the boundary here.
 	if e.mode == ModeMinibuffer {
 		e.bsArray.ClearAll()
-		gelog.Debug("ClearAll")
-		return
+	} else {
+		tree.ForEachLeafAll(func(l tree.Leaf) {
+			ed, ok := l.(*Editorleaf)
+			if !ok {
+				return
+			}
+			// 同一ファイルが編集対象
+			if ed.editBuffer == e.editBuffer {
+				ed.bsArray.ClearAll()
+			}
+		})
 	}
-	tree.ForEachLeafAll(func(l tree.Leaf) {
-		ed, ok := l.(*Editorleaf)
-		if !ok {
-			return
-		}
-		// 同一ファイルが編集対象
-		if ed.editBuffer == e.editBuffer {
-			ed.bsArray.ClearAll()
-		}
-	})
 }
 
 func (e *Editorleaf) RowsLength() int {
@@ -1416,14 +1448,20 @@ func (e *Editorleaf) insertRows(data editbuffer.Rows_, enableUndo bool) {
 	// e.meta.Cy += data.Length() - 1
 
 	// Release Boundaries
-	tree.ForEachLeafAll(func(l tree.Leaf) {
-		ed, ok := l.(*Editorleaf)
-		if !ok {
-			return // continue
-		}
-		ed.bsArray.ClearRow(beforeCursor.RowIndex)
-		ed.bsArray.Insert(beforeCursor.RowIndex+1, data.Length()-1)
-	})
+	// The minibuffer does not belong to the tree, so clear the boundary here.
+	if e.mode == ModeMinibuffer {
+		e.bsArray.ClearRow(beforeCursor.RowIndex)
+		e.bsArray.Insert(beforeCursor.RowIndex+1, data.Length()-1)
+	} else {
+		tree.ForEachLeafAll(func(l tree.Leaf) {
+			ed, ok := l.(*Editorleaf)
+			if !ok {
+				return // continue
+			}
+			ed.bsArray.ClearRow(beforeCursor.RowIndex)
+			ed.bsArray.Insert(beforeCursor.RowIndex+1, data.Length()-1)
+		})
+	}
 
 	if enableUndo {
 		e.editBuffer.UndoAction.PushAction(&editbuffer.EditAction{

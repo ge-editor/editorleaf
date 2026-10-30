@@ -10,10 +10,10 @@ import (
 )
 
 func NewMark(path string, current editbuffer.RowsPos, content string) *Mark {
-	var wsName, trName string
+	var wsID, wsName, wsPath, trName string
 	ws := workspace.Current()
 	if ws != nil {
-		wsName = ws.Name
+		wsID, wsName, wsPath = ws.ID, ws.Name, ws.FilePath
 	}
 	tr := tree.CurrentRootTree()
 	if tr != nil {
@@ -21,9 +21,11 @@ func NewMark(path string, current editbuffer.RowsPos, content string) *Mark {
 	}
 
 	return &Mark{
-		Label:         content,
-		WorkspaceName: wsName,
-		RootTreeName:  trName,
+		Label:             content,
+		WorkspaceID:       wsID,
+		WorkspaceName:     wsName,
+		WorkspaceFilePath: wsPath,
+		RootTreeName:      trName,
 		ExtraData: &ExtraData{
 			FilePath: path,
 			RowsPos:  current,
@@ -35,9 +37,10 @@ func NewMark(path string, current editbuffer.RowsPos, content string) *Mark {
 type Mark struct {
 	ID                string
 	Label             string
+	WorkspaceID       string // Workspace.ID: the stable reference
 	WorkspaceName     string
 	RootTreeName      string
-	WorkspaceFilePath string
+	WorkspaceFilePath string // kept up to date by Marks.UpdateWorkspaceFilePath
 
 	*ExtraData
 }
@@ -51,6 +54,12 @@ func (m *Mark) GetID() string {
 }
 
 func (m *Mark) UpdateExtraData() {}
+
+// implements gecore.marks.WorkspaceRef
+func (m *Mark) GetWorkspaceID() string        { return m.WorkspaceID }
+func (m *Mark) SetWorkspaceID(id string)      { m.WorkspaceID = id }
+func (m *Mark) GetWorkspaceFilePath() string  { return m.WorkspaceFilePath }
+func (m *Mark) SetWorkspaceFilePath(p string) { m.WorkspaceFilePath = p }
 
 func (m *Mark) GetStoredMark() (marks.StoredMark, error) {
 	if m == nil {
@@ -69,6 +78,7 @@ func (m *Mark) GetStoredMark() (marks.StoredMark, error) {
 	return marks.StoredMark{
 		ID:                m.ID,
 		Label:             m.Label,
+		WorkspaceID:       m.WorkspaceID,
 		WorkspaceName:     m.WorkspaceName,
 		RootTreeName:      m.RootTreeName,
 		WorkspaceFilePath: m.WorkspaceFilePath,
@@ -85,9 +95,17 @@ type ExtraData struct {
 func Equals(a, b *Mark) bool {
 	// gelog.Debug("mark Equals", "m", *a, "a", *b)
 
-	if a.WorkspaceName != b.WorkspaceName ||
+	// The ID is the identity of a workspace; the name and file may change.
+	// Marks saved before IDs existed are compared by name and file.
+	var sameWorkspace bool
+	if a.WorkspaceID != "" && b.WorkspaceID != "" {
+		sameWorkspace = a.WorkspaceID == b.WorkspaceID
+	} else {
+		sameWorkspace = a.WorkspaceName == b.WorkspaceName &&
+			a.WorkspaceFilePath == b.WorkspaceFilePath
+	}
+	if !sameWorkspace ||
 		a.RootTreeName != b.RootTreeName ||
-		a.WorkspaceFilePath != b.WorkspaceFilePath ||
 		!a.RowsPos.Equals(b.RowsPos) {
 		return false
 	}

@@ -1,38 +1,24 @@
 package editorleaf
 
 import (
-	"path/filepath"
+	"os"
 
 	"github.com/ge-editor/editorleaf/buffer"
 	"github.com/ge-editor/editorleaf/editbuffer"
-	"github.com/ge-editor/gecore/state"
 )
 
-type fileState struct {
-	RowsPos editbuffer.RowsPos
-}
-
+// saveState stores the cursor position of path.
+//
+// Restoring is done by buffer.BufferSets when it creates a buffer
+// (buffer/state.go), because package buffer cannot import editorleaf.
 func saveState(path string, c editbuffer.RowsPos) {
-	absPath, _ := filepath.Abs(path)
-	state.AppState().Save(
-		"editor:"+absPath,
-		fileState{
-			RowsPos: c,
-		},
-	)
+	buffer.SaveState(path, c)
 }
 
-func loadState(path string) *buffer.Meta {
-	var st fileState
-
-	absPath, _ := filepath.Abs(path)
-	if state.AppState().Load(
-		"editor:"+absPath,
-		&st,
-	) {
-		return &buffer.Meta{
-			RowsPos: st.RowsPos,
-		}
+// saveStateIfFile is saveState for buffers backed by an existing regular
+// file only (not "unnamed", "*stdin*" or a file never saved).
+func saveStateIfFile(path string, c editbuffer.RowsPos) {
+	if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+		saveState(path, c)
 	}
-	return &buffer.Meta{}
 }

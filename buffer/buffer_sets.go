@@ -62,6 +62,10 @@ func NewBufferSetsFromStdin(paths []string, stdinName string, stdin []byte) (bss
 		if mode.IsRegular() {
 			err = buff.Load()
 			buff.SetReadonly(mode.Perm()&0200 == 0)
+			if err == nil {
+				// Saved position; "+LINE[:COL]" (SetStartPosition) overrides it.
+				buff.restoreState()
+			}
 		} else {
 			continue // such directory or ...
 		}
@@ -182,6 +186,9 @@ func (bss *BufferSets) GetFileAndMeta(filePath string) (*editbuffer.EditBuffer, 
 		result = editbuffer.ResultNewFile
 	} else {
 		result = editbuffer.ResultLoadedFile
+		// A workspace restore sets its own cursor after this call,
+		// so the workspace position wins over the saved one.
+		buffSet.restoreState()
 	}
 	bss.Append(buffSet)
 

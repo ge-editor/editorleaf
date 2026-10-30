@@ -38,6 +38,7 @@ func toEditorMark(a marks.Mark) *mark.Mark {
 		return &mark.Mark{
 			ID:                v.ID,
 			Label:             v.Label,
+			WorkspaceID:       v.WorkspaceID,
 			WorkspaceName:     v.WorkspaceName,
 			RootTreeName:      v.RootTreeName,
 			WorkspaceFilePath: v.WorkspaceFilePath,
@@ -195,6 +196,10 @@ func (e *Editorleaf) OpenMarkPosition(mk *mark.Mark) error {
 }
 
 func workspaceForMark(mk *mark.Mark) *workspace.Workspace {
+	// The ID is the stable reference: it survives renames and moved files.
+	if w := workspace.FindByID(mk.WorkspaceID); w != nil {
+		return w
+	}
 	if mk.WorkspaceFilePath != "" {
 		want := canonicalPath(mk.WorkspaceFilePath)
 		for _, w := range workspace.All() {
