@@ -210,7 +210,10 @@ func (b *BoundariesArray) Delete(rowIndex, count int) error {
 
 // ClearAll clears all cached layout information.
 func (b *BoundariesArray) ClearAll() {
-	// b.rows = nil
+	// Zero the entries, not only the length: utils.EnsureSize grows the
+	// slice again by reslicing within its capacity, which would bring the
+	// old (stale) layouts back to life.
+	clear(b.rows)
 	b.rows = b.rows[:0]
 }
 
@@ -220,6 +223,7 @@ func (b *BoundariesArray) ClearFrom(rowIndex int) {
 		return
 	}
 
+	clear(b.rows[rowIndex:]) // see ClearAll
 	b.rows = b.rows[:rowIndex]
 }
 
