@@ -1338,8 +1338,13 @@ func (e *Editorleaf) rebuildBufferState(before, after editbuffer.RowsPos, class 
 // Other
 // --------------------
 
+// SetRowsPos moves the cursor to c. c may come from outside the text (a mark
+// whose file was shortened, a saved state): it is clamped into the rows.
+// An out-of-range RowIndex made Rows().Row() return nil, and a command like
+// Autoindent then dereferenced it.
 func (e *Editorleaf) SetRowsPos(c editbuffer.RowsPos) {
 	e.meta.RowsPos = c
+	e.meta.ClampRowsPos(e.editBuffer)
 }
 
 func (e *Editorleaf) SetRows(r editbuffer.Rows_) {

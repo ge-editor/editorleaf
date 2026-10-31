@@ -22,6 +22,20 @@ func (e *Editorleaf) MoveToMarkPosition(m *mark.Mark) {
 	e.meta.ClampRowsPos(e.editBuffer)
 }
 
+// sameMarkFile reports whether a mark's file is the file of the buffer. It is
+// called for every mark on every edit, so the paths are compared as strings
+// first and the file system is asked only when the base names agree. It also
+// works for a file that does not exist yet (IsSameFile compares the paths).
+func sameMarkFile(markPath, bufferPath string) bool {
+	if markPath == bufferPath {
+		return true
+	}
+	if filepath.Base(markPath) != filepath.Base(bufferPath) {
+		return false
+	}
+	return utils.IsSameFile(markPath, bufferPath)
+}
+
 func toEditorMark(a marks.Mark) *mark.Mark {
 
 	switch v := a.(type) {
@@ -96,7 +110,7 @@ func (e *Editorleaf) SwapCursorAndMark() {
 
 	if lastMark.RowsPos == e.meta.RowsPos {
 		if tmpMarkPos != nil {
-			e.meta.RowsPos = tmpMarkPos.RowsPos
+			e.SetRowsPos(tmpMarkPos.RowsPos)
 			tmpMarkPos = nil
 			return
 		}
@@ -104,7 +118,7 @@ func (e *Editorleaf) SwapCursorAndMark() {
 		return
 	} else {
 		tmpMarkPos = mark.NewMark(e.editBuffer.GetPath(), e.meta.RowsPos, e.getContentWidthoutSpecialCharactor(e.meta.RowsPos, 20))
-		e.meta.RowsPos = lastMark.RowsPos
+		e.SetRowsPos(lastMark.RowsPos)
 	}
 }
 

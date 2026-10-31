@@ -13,7 +13,6 @@ import (
 	"github.com/ge-editor/editorleaf/buffer"
 	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/editorleaf/highlight"
-	"github.com/ge-editor/editorleaf/mark"
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/define"
 	"github.com/ge-editor/gecore/marks"
@@ -400,26 +399,37 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 		}
 	})
 
-	for _, a := range marks.Marks.Items() {
-		m, ok := a.(*mark.Mark)
-		/* if !ok || m.EditBuffer != e.editBuffer {
-			continue
-		} */
-		if !ok || utils.IsSameFile(m.FilePath, e.editBuffer.GetPath()) {
-			continue
-		}
-
-		switch sync {
-		case INSERT:
-			m.AdjustForInsertion(start, end)
-		case DELETE:
-			if m.IsInDeletionRange(start, end) {
-				marks.Marks.Remove(m)
+	// Keep the marks of the edited file at the same text.
+	// (The condition used to be inverted: it adjusted the marks of the other
+	// files and skipped the marks of this one.) Marks that were loaded from
+	// marks.json are StoredMarks: they are replaced by the editor's Mark
+	// when they are adjusted, because a StoredMark has no position to move.
+	path := e.editBuffer.GetPath()
+	marks.Marks.Update(func(list []marks.Mark) ([]marks.Mark, bool) {
+		changed := false
+		out := make([]marks.Mark, 0, len(list))
+		for _, a := range list {
+			m := toEditorMark(a)
+			if m == nil || m.ExtraData == nil || !sameMarkFile(m.FilePath, path) {
+				out = append(out, a)
 				continue
 			}
-			m.AdjustForDeletion(start, end)
+
+			switch sync {
+			case INSERT:
+				m.AdjustForInsertion(start, end)
+			case DELETE:
+				if m.IsInDeletionRange(start, end) {
+					changed = true
+					continue // the marked text was deleted: drop the mark
+				}
+				m.AdjustForDeletion(start, end)
+			}
+			changed = true
+			out = append(out, m)
 		}
-	}
+		return out, changed
+	})
 	/* marks.Marks.Each(func(a marks.Mark) {
 		m, ok := a.(*mark.Mark)
 		if !ok {

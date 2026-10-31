@@ -245,6 +245,17 @@ func (m *Meta) ClampRowsPos(eb *editbuffer.EditBuffer) {
 	}
 }
 
+// Contains reports whether a buffer for path is open. The file need not exist
+// on disk (a new file that was not saved yet).
+func (bss *BufferSets) Contains(path string) bool {
+	for _, buffSet := range *bss {
+		if utils.IsSameFile(path, buffSet.GetPath()) {
+			return true
+		}
+	}
+	return false
+}
+
 func (bss *BufferSets) Append(buffSet *bufferSet) {
 	*bss = append(*bss, buffSet)
 }
