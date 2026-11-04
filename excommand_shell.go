@@ -5,11 +5,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/gecore"
+	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/theme"
 	"github.com/ge-editor/utils"
 )
@@ -27,6 +31,77 @@ func commandText(args []string, names ...string) string {
 		}
 	}
 	return text
+}
+
+// shellInContentDirCommand opens an interactive shell in the directory
+// containing the current buffer's file.
+func (e *Editorleaf) shellInContentDirCommand() *Command {
+	return &Command{
+		CommandName:        "shell",
+		CommandAliases:     []string{"sh"},
+		CommandDescription: "Open an interactive shell in the content directory",
+		Run: func(ctx context.Context, args []string) (bool, error) {
+			path := e.editBuffer.GetPath()
+			dir := "."
+			if path != "" {
+				dir = filepath.Dir(path)
+			}
+			absDir, err := filepath.Abs(dir)
+			if err != nil {
+				return true, err
+			}
+
+			shell := os.Getenv("SHELL")
+			if shell == "" {
+				shell = "sh"
+			}
+			shellPath, err := exec.LookPath(shell)
+			if err != nil {
+				shellPath, err = exec.LookPath("sh")
+				if err != nil {
+					return true, err
+				}
+			}
+			cmd := interactiveShellCommand(ctx, shellPath)
+			term := screen.Get()
+			// Call tcell's screen suspension directly. The wrapper's Suspend
+			// sends SIGSTOP to ge, which is intended for Ctrl+Z job control.
+			term.Screen.Suspend()
+			cmd.Dir = absDir
+			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+			cmd.Env = os.Environ()
+			ps1Set := false
+			for i, env := range cmd.Env {
+				if strings.HasPrefix(env, "PS1=") {
+					cmd.Env[i] = "PS1=ge-shell> "
+					ps1Set = true
+				}
+			}
+			if !ps1Set {
+				cmd.Env = append(cmd.Env, "PS1=ge-shell> ")
+			}
+			runErr := cmd.Run()
+			resumeErr := term.Resume()
+			if runErr != nil {
+				return true, runErr
+			}
+			return true, resumeErr
+		},
+	}
+}
+
+func interactiveShellCommand(ctx context.Context, shellPath string) *exec.Cmd {
+	switch path.Base(shellPath) {
+	case "bash":
+		// Skip startup files so they cannot replace the custom prompt.
+		return exec.CommandContext(ctx, shellPath, "--noprofile", "--norc", "-i")
+	case "zsh":
+		return exec.CommandContext(ctx, shellPath, "-f", "-i")
+	case "fish":
+		return exec.CommandContext(ctx, shellPath, "--no-config", "-i", "-C", "function fish_prompt; printf 'ge-shell> '; end")
+	default:
+		return exec.CommandContext(ctx, shellPath, "-i")
+	}
 }
 
 // shellCommand runs ! COMMAND with sh -c and inserts stdout at the cursor.

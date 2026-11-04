@@ -73,7 +73,7 @@ func (qg *quitGuard) ConfirmFunc() {
 func findMetaInTree(killTargetBuf *editbuffer.EditBuffer) *buffer.Meta {
 	var meta *buffer.Meta // nil
 
-	tree.ForEachLeafAll(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) bool {
 		e, ok := l.(*Editorleaf)
 		if ok {
 			// Use the meta the leaf is actually using. BufferSets.GetMeta
@@ -83,6 +83,7 @@ func findMetaInTree(killTargetBuf *editbuffer.EditBuffer) *buffer.Meta {
 				meta = e.meta
 			}
 		}
+		return true
 	})
 
 	return meta

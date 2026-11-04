@@ -52,5 +52,6 @@ func (e *Editorleaf) Commands() []excommand.ExCommand {
 
 		e.shellCommand(),
 		e.shellRegionCommand(),
+		e.shellInContentDirCommand(),
 	}
 }

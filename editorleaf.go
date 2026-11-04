@@ -208,13 +208,14 @@ func (e *Editorleaf) Kill(leaf tree.Leaf, isActive bool) tree.Leaf {
 
 	var toReplace []*Editorleaf
 
-	tree.ForEachLeafAll(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) bool {
 		e, ok := l.(*Editorleaf)
 		if ok {
 			if e.editBuffer == killTargetBuf {
 				toReplace = append(toReplace, e)
 			}
 		}
+		return true
 	})
 
 	// Save the cursor position of the file being closed.
@@ -334,15 +335,15 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 	}
 
 	// Synchronize cursor positions and buffer boundaries in other editors linked to the same file.
-	tree.ForEachLeafAll(func(leaf tree.Leaf) {
+	tree.ForEachLeafAll(func(leaf tree.Leaf) bool {
 		editor, ok := leaf.(*Editorleaf)
 		if !ok {
-			return
+			return true
 		}
 
 		// Skip if the editor is linked to a different file or is the current editor.
 		if editor.editBuffer != e.editBuffer {
-			return
+			return true
 		}
 
 		// Adjust foundIndex that is results of search and replace
@@ -397,6 +398,8 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 				}
 			}
 		}
+
+		return true
 	})
 
 	// Keep the marks of the edited file at the same text.
@@ -823,7 +826,7 @@ func (e *Editorleaf) drawEditorleaf(ctx context.Context) bool {
 		// line number area
 		e.screen.FillRect(screen.Rect{
 			X:      e.editArea.X,
-			Y:      y,
+			Y:      e.editArea.Y + y,
 			Width:  e.lineNumberWidth,
 			Height: h,
 		}, 0, theme.ColorLineNumber)

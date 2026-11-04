@@ -1,6 +1,7 @@
 package editorleaf
 
 import (
+	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/gecore/tree"
@@ -86,4 +87,45 @@ func (l *LeafType) SetCtx(ctx *tree.LeafContext) {
 
 func (l *LeafType) CancelManager() *gecore.EventCancelManager {
 	return l.ctx.CancelManager // .Get("draw")
+}
+
+func (l *LeafType) Opener(destination, behavior string, flag tree.OpenerFlag, data any, f func(bool, error)) {
+
+	var e *Editorleaf
+	tree.ForEachLeafAll(func(leaf tree.Leaf) bool {
+		editor, ok := leaf.(*Editorleaf)
+		if ok {
+			e = editor
+			return false // 打ちきり
+		}
+		return true
+	})
+
+	if e == nil {
+		f(false, nil)
+		return
+	}
+
+	switch req := data.(type) {
+	case tree.OpenRequest:
+		handled, err := e.openTarget(req)
+		f(handled, err)
+	}
+}
+
+// openTarget implements tree.FileOpener.
+// It opens req.Path in this editor and, when req.Line is given, moves the
+// cursor there. The cursor is clamped to the buffer.
+func (e *Editorleaf) openTarget(req tree.OpenRequest) (bool, error) {
+	if _, err := e.OpenFile(req.Path); err != nil {
+		return true, err
+	}
+	if req.Line > 0 {
+		pos := editbuffer.RowsPos{RowIndex: req.Line - 1}
+		if req.Col > 0 {
+			pos.ColIndex = req.Col - 1
+		}
+		e.SetRowsPos(pos)
+	}
+	return true, nil
 }

@@ -73,10 +73,10 @@ func (e *Editorleaf) SaveFile() {
 	}
 
 	if result&editbuffer.ResultFormatted != 0 {
-		tree.ForEachLeafAll(func(l tree.Leaf) {
+		tree.ForEachLeafAll(func(l tree.Leaf) bool {
 			ed, ok := l.(*Editorleaf)
 			if !ok {
-				return
+				return true
 			}
 
 			ed.adjustFormattedCursorPosition()
@@ -100,6 +100,8 @@ func (e *Editorleaf) SaveFile() {
 			for ed.meta.RowsPos.ColIndex > 0 && !utf8.RuneStart(line[ed.meta.RowsPos.ColIndex]) {
 				ed.meta.RowsPos.ColIndex--
 			}
+
+			return true
 		})
 	}
 
@@ -762,15 +764,17 @@ func (e *Editorleaf) DeleteRuneBackward() {
 			e.bsArray.Delete(start.RowIndex+1, count)
 		}
 	} else {
-		tree.ForEachLeafAll(func(l tree.Leaf) {
+		tree.ForEachLeafAll(func(l tree.Leaf) bool {
 			ed, ok := l.(*Editorleaf)
 			if !ok {
-				return
+				return true
 			}
 			ed.bsArray.ClearRow(start.RowIndex)
 			if count > 0 {
 				ed.bsArray.Delete(start.RowIndex+1, count)
 			}
+
+			return true
 		})
 	}
 
@@ -814,15 +818,17 @@ func (e *Editorleaf) DeleteRune() {
 			e.bsArray.Delete(start.RowIndex+1, count)
 		}
 	} else {
-		tree.ForEachLeafAll(func(l tree.Leaf) {
+		tree.ForEachLeafAll(func(l tree.Leaf) bool {
 			ed, ok := l.(*Editorleaf)
 			if !ok {
-				return
+				return true
 			}
 			ed.bsArray.ClearRow(start.RowIndex)
 			if count > 0 {
 				ed.bsArray.Delete(start.RowIndex+1, count)
 			}
+
+			return true
 		})
 	}
 
@@ -876,12 +882,14 @@ func (e *Editorleaf) BackwardKillLine() {
 	if e.mode == ModeMinibuffer {
 		e.bsArray.ClearRow(e.meta.RowsPos.RowIndex)
 	} else {
-		tree.ForEachLeafAll(func(l tree.Leaf) {
+		tree.ForEachLeafAll(func(l tree.Leaf) bool {
 			ed, ok := l.(*Editorleaf)
 			if !ok {
-				return
+				return true
 			}
 			ed.bsArray.ClearRow(e.meta.RowsPos.RowIndex)
+
+			return true
 		})
 	}
 
@@ -931,12 +939,14 @@ func (e *Editorleaf) KillLine() {
 	if e.mode == ModeMinibuffer {
 		e.bsArray.ClearRow(e.meta.RowsPos.RowIndex)
 	} else {
-		tree.ForEachLeafAll(func(l tree.Leaf) {
+		tree.ForEachLeafAll(func(l tree.Leaf) bool {
 			ed, ok := l.(*Editorleaf)
 			if !ok {
-				return
+				return true
 			}
 			ed.bsArray.ClearRow(e.meta.RowsPos.RowIndex)
+
+			return true
 		})
 	}
 
@@ -1030,13 +1040,15 @@ func (e *Editorleaf) killRegion(start, stop editbuffer.RowsPos) {
 		e.bsArray.ClearRow(start.RowIndex)
 		e.bsArray.Delete(start.RowIndex+1, stop.RowIndex-start.RowIndex)
 	} else {
-		tree.ForEachLeafAll(func(l tree.Leaf) {
+		tree.ForEachLeafAll(func(l tree.Leaf) bool {
 			ed, ok := l.(*Editorleaf)
 			if !ok {
-				return
+				return true
 			}
 			ed.bsArray.ClearRow(start.RowIndex)
 			ed.bsArray.Delete(start.RowIndex+1, stop.RowIndex-start.RowIndex)
+
+			return true
 		})
 	}
 
@@ -1310,10 +1322,10 @@ func (e *Editorleaf) cursorAfterDelete(a *editbuffer.EditAction) editbuffer.Rows
 // Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
 // Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
 func (e *Editorleaf) rebuildBufferState(before, after editbuffer.RowsPos, class editbuffer.ActionClass) {
-	tree.ForEachLeafAll(func(l tree.Leaf) {
+	tree.ForEachLeafAll(func(l tree.Leaf) bool {
 		ed, ok := l.(*Editorleaf)
 		if !ok {
-			return
+			return true
 		}
 
 		var start int
@@ -1331,6 +1343,8 @@ func (e *Editorleaf) rebuildBufferState(before, after editbuffer.RowsPos, class 
 				ed.bsArray.Delete(start, count)
 			}
 		}
+
+		return true
 	})
 }
 
@@ -1357,15 +1371,17 @@ func (e *Editorleaf) SetRows(r editbuffer.Rows_) {
 	if e.mode == ModeMinibuffer {
 		e.bsArray.ClearAll()
 	} else {
-		tree.ForEachLeafAll(func(l tree.Leaf) {
+		tree.ForEachLeafAll(func(l tree.Leaf) bool {
 			ed, ok := l.(*Editorleaf)
 			if !ok {
-				return
+				return true
 			}
 			// 同一ファイルが編集対象
 			if ed.editBuffer == e.editBuffer {
 				ed.bsArray.ClearAll()
 			}
+
+			return true
 		})
 	}
 }
@@ -1458,13 +1474,15 @@ func (e *Editorleaf) insertRows(data editbuffer.Rows_, enableUndo bool) {
 		e.bsArray.ClearRow(beforeCursor.RowIndex)
 		e.bsArray.Insert(beforeCursor.RowIndex+1, data.Length()-1)
 	} else {
-		tree.ForEachLeafAll(func(l tree.Leaf) {
+		tree.ForEachLeafAll(func(l tree.Leaf) bool {
 			ed, ok := l.(*Editorleaf)
 			if !ok {
-				return // continue
+				return true // continue
 			}
 			ed.bsArray.ClearRow(beforeCursor.RowIndex)
 			ed.bsArray.Insert(beforeCursor.RowIndex+1, data.Length()-1)
+
+			return true // continue
 		})
 	}
 
