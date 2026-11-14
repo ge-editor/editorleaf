@@ -16,7 +16,6 @@ func RegisterGlobal(cmd excommand.ExCommand) {
 
 type Command struct {
 	CommandName        string
-	CommandAliases     []string
 	CommandDescription string
 	Run                func(ctx context.Context, args []string) (handled bool, err error)
 
@@ -26,7 +25,6 @@ type Command struct {
 }
 
 func (c *Command) Name() string        { return c.CommandName }
-func (c *Command) Aliases() []string   { return c.CommandAliases }
 func (c *Command) Description() string { return c.CommandDescription }
 
 // CompleteArgs implements excommand.ArgCompleter.
@@ -47,11 +45,25 @@ func (c *Command) Execute(ctx context.Context, args []string) (bool, error) {
 // -------------------
 
 func (e *Editorleaf) Commands() []excommand.ExCommand {
-	return []excommand.ExCommand{
+	cmds := []excommand.ExCommand{
 		e.languageCommand(),
+		e.reloadFileCommand(),
+
+		e.hoverCommand(),
+		e.definitionCommand(),
+		e.referencesCommand(),
+		e.renameCommand(),
+		e.renameUndoCommand(),
+		e.symbolsCommand(),
+		e.workspaceSymbolCommand(),
+		e.formatCommand(),
+		e.codeActionCommand(),
+		e.completeCommand(),
 
 		e.shellCommand(),
 		e.shellRegionCommand(),
 		e.shellInContentDirCommand(),
 	}
+	// Commands of the mode of the buffer (go-install-tools for Go, ...).
+	return append(cmds, e.modeCommands()...)
 }

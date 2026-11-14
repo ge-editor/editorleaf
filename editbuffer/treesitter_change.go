@@ -44,6 +44,14 @@ const (
 //	Delete: NewEnd == Start, OldEnd = end of the removed region, Text = nil
 //	Reset : Text is the complete replacement snapshot; positions are unused
 type Change struct {
+	// Version is the buffer's version right after this change. It starts
+	// at 0 for a new buffer, increases by exactly 1 per Change (also for
+	// ChangeReset), and never goes back, not even on Undo (an undo is just
+	// another edit). Consumers that talk to the outside world, such as the
+	// LSP client's textDocument/didChange, use it as the document version.
+	// See EditBuffer.Version.
+	Version uint64
+
 	Kind   ChangeKind
 	Start  RowsPos
 	OldEnd RowsPos
@@ -72,6 +80,11 @@ type changeListenerEntry struct {
 
 // changeNotifier is embedded in EditBuffer. The zero value is ready to use.
 type changeNotifier struct {
+	version uint64 // see EditBuffer.Version
+
+	nextSaveListenerID int
+	saveListeners      []saveListenerEntry
+
 	nextListenerID int
 	listeners      []changeListenerEntry
 
@@ -129,7 +142,24 @@ func (n *changeNotifier) AddChangeListener(fn ChangeListener) (remove func()) {
 	}
 }
 
+// Version returns the buffer's current version: the Version of the most
+// recent Change, or 0 if the buffer has not been modified through the
+// notifying methods yet. Call it on the UI goroutine.
+//
+// LoadFrom / Load / New set the initial content without a Change, so they
+// do not advance the version. They run before anyone listens; a consumer
+// that opens the buffer later (didOpen) takes its text and Version() at the
+// same moment and then applies only Changes with a greater Version.
+func (n *changeNotifier) Version() uint64 {
+	return n.version
+}
+
 func (n *changeNotifier) emit(c Change) {
+	// The version advances even when nobody listens, so a listener added
+	// later still sees a consistent, gap-free sequence from then on.
+	n.version++
+	c.Version = n.version
+
 	for _, l := range n.listeners {
 		l.fn(c)
 	}
@@ -229,4 +259,43 @@ func joinLF(rs Rows_) []byte {
 		b = append(b, r...)
 	}
 	return b
+}
+
+// SaveListener is called after the buffer was written to disk
+// successfully, on the goroutine that called Save (the UI goroutine).
+type SaveListener func()
+
+type saveListenerEntry struct {
+	id int
+	fn SaveListener
+}
+
+// AddSaveListener registers fn to be called after every successful Save
+// and returns the function that unregisters it.
+//
+// It is the counterpart of AddChangeListener for "the file on disk now
+// equals the buffer": the LSP client turns it into textDocument/didSave.
+// Save runs a save-time formatting first, which is reported as a
+// ChangeReset before the write, so a save listener always runs after the
+// change listeners have seen the final text.
+func (n *changeNotifier) AddSaveListener(fn SaveListener) (remove func()) {
+	n.nextSaveListenerID++
+	id := n.nextSaveListenerID
+	n.saveListeners = append(n.saveListeners, saveListenerEntry{id: id, fn: fn})
+
+	return func() {
+		next := make([]saveListenerEntry, 0, len(n.saveListeners))
+		for _, l := range n.saveListeners {
+			if l.id != id {
+				next = append(next, l)
+			}
+		}
+		n.saveListeners = next
+	}
+}
+
+func (n *changeNotifier) emitSaved() {
+	for _, l := range n.saveListeners {
+		l.fn()
+	}
 }

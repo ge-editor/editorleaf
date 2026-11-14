@@ -31,6 +31,10 @@ type EditBuffer struct {
 	mode    os.FileMode
 	modTime time.Time
 
+	// disk is the state of the file when it was last read or written
+	// (see diskstate.go).
+	disk diskState
+
 	langMode *lang.Mode
 
 	rows     *Rows_
@@ -138,13 +142,20 @@ func (eb *EditBuffer) New() error {
 
 // Load file
 func (eb *EditBuffer) Load() error {
+	// Stat before reading, so a change during the read is not lost.
+	mt, size, ok := statRegular(eb.path)
+
 	fp, err := os.Open(eb.path)
 	if err != nil {
 		return err
 	}
 	defer fp.Close()
 
-	return eb.LoadFrom(fp)
+	if err := eb.LoadFrom(fp); err != nil {
+		return err
+	}
+	eb.setDisk(mt, size, ok)
+	return nil
 }
 
 // LoadFrom replaces the content with everything read from r and detects the
@@ -308,17 +319,30 @@ func (eb *EditBuffer) Save() (Result, error) {
 		return result, err
 	}
 
+	eb.recordDisk() // our own write is not an external change
+	eb.emitSaved()
 	return result | ResultSaved, nil
 }
 
-// would like to consider other formats such as dates.
+// Backup copies the file on disk to a backup file next to it, named
+// "<path>.~YYYYMMDD_HHMMSS-NNN~" (the time of the backup, and NNN counting
+// from 001 when that name is taken). It fails when the file does not exist.
 func (eb *EditBuffer) Backup() error {
 	if !utils.ExistsFile(eb.path) {
 		return fmt.Errorf("(No file that need to be backup)")
 	}
 
-	for i := 1; i < 1_000_000; i++ {
+	/* for i := 1; i < 1_000_000; i++ {
 		backup := fmt.Sprintf("%s.~%d~", eb.path, i)
+		if !utils.ExistsFile(backup) {
+			return utils.CopyFile(eb.path, backup)
+		}
+	}
+	return fmt.Errorf("Too many backups") */
+
+	nowStr := time.Now().Format("20060102_150405")
+	for i := 1; i < 1000; i++ {
+		backup := fmt.Sprintf("%s.~%s-%03d~", eb.path, nowStr, i)
 		if !utils.ExistsFile(backup) {
 			return utils.CopyFile(eb.path, backup)
 		}
@@ -333,6 +357,9 @@ func (eb *EditBuffer) SetPath(path string) {
 	eb.base = filepath.Base(path)
 	eb.ext = filepath.Ext(path)
 	eb.dispPath = eb.base
+	// The state recorded for the old path means nothing for the new one (an
+	// existing file was already confirmed to be overwritten by Save as).
+	eb.recordDisk()
 }
 
 func (eb *EditBuffer) GetPath() string {

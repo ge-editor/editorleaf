@@ -6,6 +6,7 @@ import (
 	"github.com/gdamore/tcell/v3"
 
 	"github.com/ge-editor/editorleaf/buffer"
+	"github.com/ge-editor/editorleaf/diagnostic"
 	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/editorleaf/highlight"
 	"github.com/ge-editor/editorleaf/syntax"
@@ -30,6 +31,17 @@ func (e *Editorleaf) InitTreesitter() {
 		highlight.LayerSyntax,
 		dispatchUI,
 	)
+
+	// The diagnostics of the buffer (from a language server, if any) live
+	// in their own layer; subscribing replays what is already known.
+	e.diagnosticUnsubscribe = diagnostic.Subscribe(
+		e.editBuffer,
+		e.meta.HighlightLayer,
+		highlight.LayerDiagnostic,
+	)
+
+	// The search results follow the edits of the buffer.
+	e.searchUnsubscribe = e.editBuffer.AddChangeListener(e.onBufferChangeForSearch)
 }
 
 // setBuffer is the only place that may replace e.editBuffer / e.meta.
@@ -44,9 +56,13 @@ func (e *Editorleaf) InitTreesitter() {
 //
 // Callers that need to save the old meta (PushMeta) must do so before
 // calling setBuffer. m must not be nil.
+//
+// The buffer that is shown becomes the most recently used one
+// (BufferSets.Touch), so that closing a buffer returns to the one used before.
 func (e *Editorleaf) setBuffer(eb *editbuffer.EditBuffer, m *buffer.Meta) {
 	e.WillCloseTreesitter()
 	e.editBuffer, e.meta = eb, m
+	BufferSets.Touch(eb)
 	e.bsArray.ClearAll()
 	e.InitTreesitter()
 }
@@ -58,15 +74,25 @@ func (e *Editorleaf) WillCloseTreesitter() {
 		e.syntaxUnsubscribe()
 		e.syntaxUnsubscribe = nil
 	}
+	if e.diagnosticUnsubscribe != nil {
+		e.diagnosticUnsubscribe()
+		e.diagnosticUnsubscribe = nil
+	}
+	if e.searchUnsubscribe != nil {
+		e.searchUnsubscribe()
+		e.searchUnsubscribe = nil
+	}
 }
 
-// dispatchUI queues worker-owned highlight updates on the UI event loop.
-// The event loop applies the closure before starting its normal redraw.
+// syntaxUIUpdates is the queue of worker-owned highlight updates that
+// dispatchUI adds to. The UI event loop applies the closures before starting
+// its normal redraw.
 var syntaxUIUpdates struct {
 	sync.Mutex
 	queue []func()
 }
 
+// dispatchUI queues fn on syntaxUIUpdates and wakes the UI event loop.
 func dispatchUI(fn func()) {
 	syntaxUIUpdates.Lock()
 	syntaxUIUpdates.queue = append(syntaxUIUpdates.queue, fn)

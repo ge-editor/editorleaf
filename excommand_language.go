@@ -16,11 +16,11 @@ import (
 // the buffer follows the change (see syntax.Subscribe).
 //
 //	ESC x language go
-//	ESC x lang <Enter>      -- then pick from the filtered list
+//	ESC x language <Enter>  -- then pick from the filtered list
 func (e *Editorleaf) languageCommand() *Command {
 	cmd := &Command{
-		CommandName:        "language",
-		CommandAliases:     []string{"lang", "set-language"},
+		CommandName: "language",
+		// CommandAliases:     []string{},
 		CommandDescription: "Set the language mode of the buffer",
 		Complete:           LanguageNames,
 	}
@@ -43,7 +43,8 @@ func (e *Editorleaf) languageCommand() *Command {
 // input ("language go") as one element, while other callers may pass only the
 // arguments; both forms are accepted.
 func languageArg(cmd *Command, args []string) string {
-	return commandText(args, append([]string{cmd.CommandName}, cmd.CommandAliases...)...)
+	// return commandText(args, append([]string{cmd.CommandName}, cmd.CommandAliases...)...)
+	return commandText(args, cmd.CommandName)
 }
 
 // LanguageNames returns the names of the registered lang.Modes, in

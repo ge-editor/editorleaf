@@ -20,16 +20,16 @@ import (
 
 // commandText returns the argument text of an ESC x input. ESC x passes the
 // raw input as one element ("! ls -la"); other callers may pass only the
-// arguments. A leading token equal to one of names (case-insensitive) is
-// removed; the rest is returned as is, so quoting and inner spaces survive.
-func commandText(args []string, names ...string) string {
+// arguments. A leading token equal to name (case-insensitive) is removed; the
+// rest is returned as is, so quoting and inner spaces survive.
+func commandText(args []string, name string) string {
 	text := strings.TrimSpace(strings.Join(args, " "))
 	first, rest, _ := strings.Cut(text, " ")
-	for _, n := range names {
-		if strings.EqualFold(first, n) {
-			return strings.TrimSpace(rest)
-		}
+	//for _, n := range name {
+	if strings.EqualFold(first, name) {
+		return strings.TrimSpace(rest)
 	}
+	//}
 	return text
 }
 
@@ -37,8 +37,8 @@ func commandText(args []string, names ...string) string {
 // containing the current buffer's file.
 func (e *Editorleaf) shellInContentDirCommand() *Command {
 	return &Command{
-		CommandName:        "shell",
-		CommandAliases:     []string{"sh"},
+		CommandName: "shell",
+		// CommandAliases:     []string{},
 		CommandDescription: "Open an interactive shell in the content directory",
 		Run: func(ctx context.Context, args []string) (bool, error) {
 			path := e.editBuffer.GetPath()
@@ -62,14 +62,22 @@ func (e *Editorleaf) shellInContentDirCommand() *Command {
 					return true, err
 				}
 			}
-			cmd := interactiveShellCommand(ctx, shellPath)
+
+			cmd, cleanup, err := interactiveShellCommand(ctx, shellPath)
+			if err != nil {
+				return true, err
+			}
+			defer cleanup()
+
 			term := screen.Get()
 			// Call tcell's screen suspension directly. The wrapper's Suspend
 			// sends SIGSTOP to ge, which is intended for Ctrl+Z job control.
 			term.Screen.Suspend()
 			cmd.Dir = absDir
 			cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-			cmd.Env = os.Environ()
+			if cmd.Env == nil {
+				cmd.Env = os.Environ()
+			}
 			ps1Set := false
 			for i, env := range cmd.Env {
 				if strings.HasPrefix(env, "PS1=") {
@@ -90,17 +98,85 @@ func (e *Editorleaf) shellInContentDirCommand() *Command {
 	}
 }
 
-func interactiveShellCommand(ctx context.Context, shellPath string) *exec.Cmd {
+// interactiveShellCommand returns the command and a cleanup function.
+func interactiveShellCommand(ctx context.Context, shellPath string) (*exec.Cmd, func(), error) {
+	noop := func() {}
 	switch path.Base(shellPath) {
 	case "bash":
-		// Skip startup files so they cannot replace the custom prompt.
-		return exec.CommandContext(ctx, shellPath, "--noprofile", "--norc", "-i")
+		f, err := os.CreateTemp("", "ge-bashrc-*")
+		if err != nil {
+			return nil, noop, err
+		}
+		cleanup := func() { os.Remove(f.Name()) }
+		const rc = `[ -f ~/.bashrc ] && . ~/.bashrc
+PS1='ge-shell \w> '
+`
+		if _, err := f.WriteString(rc); err != nil {
+			f.Close()
+			cleanup()
+			return nil, noop, err
+		}
+		if err := f.Close(); err != nil {
+			cleanup()
+			return nil, noop, err
+		}
+		return exec.CommandContext(ctx, shellPath, "--rcfile", f.Name(), "-i"), cleanup, nil
+	// case "zsh":
+	// 	return exec.CommandContext(ctx, shellPath, "-f", "-i"), noop, nil
 	case "zsh":
-		return exec.CommandContext(ctx, shellPath, "-f", "-i")
+		dir, err := os.MkdirTemp("", "ge-zdotdir-*")
+		if err != nil {
+			return nil, noop, err
+		}
+		cleanup := func() { os.RemoveAll(dir) }
+
+		// 元の ZDOTDIR (未設定なら $HOME) を指す。
+		const zshenv = `_ge_zd="${GE_ORIG_ZDOTDIR:-$HOME}"
+[[ -f "$_ge_zd/.zshenv" ]] && source "$_ge_zd/.zshenv"
+unset _ge_zd
+`
+		const zshrc = `if [[ -n "$GE_ORIG_ZDOTDIR" ]]; then
+  ZDOTDIR="$GE_ORIG_ZDOTDIR"
+else
+  unset ZDOTDIR
+fi
+unset GE_ORIG_ZDOTDIR
+[[ -f "${ZDOTDIR:-$HOME}/.zshrc" ]] && source "${ZDOTDIR:-$HOME}/.zshrc"
+__ge_prompt() { PROMPT='ge-shell %~> ' }
+__ge_prompt
+precmd_functions+=(__ge_prompt)
+`
+		if err := os.WriteFile(filepath.Join(dir, ".zshenv"), []byte(zshenv), 0o600); err != nil {
+			cleanup()
+			return nil, noop, err
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".zshrc"), []byte(zshrc), 0o600); err != nil {
+			cleanup()
+			return nil, noop, err
+		}
+
+		cmd := exec.CommandContext(ctx, shellPath, "-i")
+		cmd.Env = append(os.Environ(),
+			"GE_ORIG_ZDOTDIR="+os.Getenv("ZDOTDIR"),
+			"ZDOTDIR="+dir,
+		)
+		return cmd, cleanup, nil
+	// case "fish":
+	// 	return exec.CommandContext(ctx, shellPath, "--no-config", "-i", "-C",
+	// 		"function fish_prompt; printf 'ge-shell %s> ' (prompt_pwd); end"), noop, nil
 	case "fish":
-		return exec.CommandContext(ctx, shellPath, "--no-config", "-i", "-C", "function fish_prompt; printf 'ge-shell> '; end")
+		const initCmd = `set -g fish_prompt_pwd_dir_length 0
+function fish_prompt
+    set_color green
+    printf 'ge-shell'
+    set_color normal
+    printf ' %s> ' (prompt_pwd)
+end
+function fish_right_prompt
+end`
+		return exec.CommandContext(ctx, shellPath, "-i", "-C", initCmd), noop, nil
 	default:
-		return exec.CommandContext(ctx, shellPath, "-i")
+		return exec.CommandContext(ctx, shellPath, "-i"), noop, nil
 	}
 }
 

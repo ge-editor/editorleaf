@@ -9,37 +9,38 @@ func (c RowsPos) Equals(other RowsPos) bool {
 	return c.RowIndex == other.RowIndex && c.ColIndex == other.ColIndex
 }
 
-// adjustCursorForDeletion updates the cursor position to reflect the deleted text within the buffer.
+// AdjustForDeletion updates the position to reflect the deleted text within the buffer.
 func (c *RowsPos) AdjustForDeletion(deleteStart, deleteEnd RowsPos) {
 	// If the cursor is before the deletion row, no adjustment is needed.
 	if c.RowIndex < deleteStart.RowIndex {
 		return
 	}
 
-	// If the cursor is on the same row as the deletion start:
-	if c.RowIndex == deleteStart.RowIndex {
-		// If the deletion is after the cursor column, leave the cursor unchanged.
-		if c.ColIndex <= deleteStart.ColIndex {
-			return
-		}
-		// If the deletion affects the cursor's position within the same row, move it to the start of deletion.
-		c.ColIndex = deleteStart.ColIndex
+	// At or before the start of the deletion: unchanged.
+	if c.RowIndex == deleteStart.RowIndex && c.ColIndex <= deleteStart.ColIndex {
 		return
 	}
 
-	// If the cursor is after the deletion row range:
+	// After the deleted rows: only the row index changes.
 	if c.RowIndex > deleteEnd.RowIndex {
-		// Adjust the row index to account for the rows deleted.
 		c.RowIndex -= deleteEnd.RowIndex - deleteStart.RowIndex
 		return
 	}
 
-	// If the cursor is within the deleted range, move it to the start of the deletion.
-	c.RowIndex = deleteStart.RowIndex
-	c.ColIndex = deleteStart.ColIndex
+	// On the last row of the deleted range but behind its end: the text from
+	// there on is joined to the start of the deletion, so the position keeps
+	// its distance from the end of the deleted text.
+	if c.RowIndex == deleteEnd.RowIndex && c.ColIndex >= deleteEnd.ColIndex {
+		c.ColIndex = deleteStart.ColIndex + (c.ColIndex - deleteEnd.ColIndex)
+		c.RowIndex = deleteStart.RowIndex
+		return
+	}
+
+	// Within the deleted range: move it to the start of the deletion.
+	*c = deleteStart
 }
 
-// adjustCursorForInsertion updates the cursor position to reflect the inserted text within the buffer.
+// AdjustForInsertion updates the position to reflect the inserted text within the buffer.
 func (c *RowsPos) AdjustForInsertion(insertStart, insertEnd RowsPos) {
 	// If the cursor is before the insertion row, no adjustment is needed.
 	if c.RowIndex < insertStart.RowIndex {

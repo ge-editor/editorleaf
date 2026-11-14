@@ -154,37 +154,11 @@ func (m *Mark) AdjustForInsertion(insertStart, insertEnd editbuffer.RowsPos) {
 // deleteStart: deletion start position
 // deleteEnd: deletion end position
 func (m *Mark) AdjustForDeletion(deleteStart, deleteEnd editbuffer.RowsPos) {
-	// If the mark is before the deletion start row,
-	// its position is unaffected.
-	if m == nil || m.RowIndex < deleteStart.RowIndex {
+	// RowsPos.AdjustForDeletion does the work; the mark is a RowsPos.
+	if m == nil || m.ExtraData == nil {
 		return
 	}
-
-	// Mark is on the same row as deletion start.
-	if m.RowIndex == deleteStart.RowIndex {
-
-		// If the mark is at or before the deletion start,
-		// no adjustment is needed.
-		if m.ColIndex <= deleteStart.ColIndex {
-			return
-		}
-
-		// Otherwise, move the mark to the deletion start.
-		m.ColIndex = deleteStart.ColIndex
-		return
-	}
-
-	// Mark is below the deleted range:
-	// shift upward by the number of removed rows.
-	if m.RowIndex > deleteEnd.RowIndex {
-		m.RowIndex -= deleteEnd.RowIndex - deleteStart.RowIndex
-		return
-	}
-
-	// Mark is inside the deleted range:
-	// move it to the deletion start position.
-	m.RowIndex = deleteStart.RowIndex
-	m.ColIndex = deleteStart.ColIndex
+	m.RowsPos.AdjustForDeletion(deleteStart, deleteEnd)
 }
 
 // IsInDeletionRange reports whether the mark position is inside the deleted
@@ -193,8 +167,14 @@ func (m *Mark) IsInDeletionRange(deleteStart, deleteEnd editbuffer.RowsPos) bool
 	if m == nil {
 		return false
 	}
-	return (m.RowIndex > deleteStart.RowIndex ||
-		(m.RowIndex == deleteStart.RowIndex && m.ColIndex > deleteStart.ColIndex)) &&
-		(m.RowIndex < deleteEnd.RowIndex ||
-			(m.RowIndex == deleteEnd.RowIndex && m.ColIndex < deleteEnd.ColIndex))
+
+	// 1. m >= deleteStart
+	isAfterStart := m.RowIndex > deleteStart.RowIndex ||
+		(m.RowIndex == deleteStart.RowIndex && m.ColIndex >= deleteStart.ColIndex)
+
+	// 2. m < deleteEnd
+	isBeforeEnd := m.RowIndex < deleteEnd.RowIndex ||
+		(m.RowIndex == deleteEnd.RowIndex && m.ColIndex < deleteEnd.ColIndex)
+
+	return isAfterStart && isBeforeEnd
 }

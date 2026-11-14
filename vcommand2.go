@@ -5,10 +5,12 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strconv"
 	"unicode/utf8"
 
 	"github.com/atotto/clipboard"
+	"github.com/gdamore/tcell/v3"
 
 	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/gecore"
@@ -16,6 +18,7 @@ import (
 	"github.com/ge-editor/gecore/killbuffer"
 	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/gelog"
+	"github.com/ge-editor/keychord"
 	"github.com/ge-editor/locale"
 	"github.com/ge-editor/theme"
 	"github.com/ge-editor/utils"
@@ -59,8 +62,57 @@ func (e *Editorleaf) adjustFormattedCursorPosition() {
 	e.meta.RowsPos.ColIndex = i
 }
 
-// If the file does not exist, a backup error will occur
+// SaveFile saves the buffer. When the file on disk was changed by another
+// program since the buffer was read from it, it asks first (see SaveFileThen).
 func (e *Editorleaf) SaveFile() {
+	e.SaveFileThen(nil)
+}
+
+// SaveFileThen is SaveFile that calls done after the buffer was saved (also
+// when the save failed, like the callers that went on after SaveFile). done is
+// not called when the user answers n to "overwrite the changed file?": the
+// caller's follow-up (closing the buffer, ...) must not run then.
+//
+// The question is asked in the minibuffer, so done runs after the answer.
+// The old file is kept by the backup that every save makes.
+func (e *Editorleaf) SaveFileThen(done func()) {
+	eb := e.editBuffer
+	if !eb.DiskDiffers() {
+		e.saveFileNow()
+		if done != nil {
+			done()
+		}
+		return
+	}
+
+	mb := MinibufferManager()
+	if mb.IsActive() {
+		mb.Close() // the prompt of the caller (for example "Save changes?")
+	}
+	base := filepath.Base(eb.GetPath())
+	prompt := fmt.Sprintf("%s was changed on disk after it was read. Overwrite it? [y/n]: ", base)
+	session := NewSession(prompt, func(km *keychord.RootNode, miniEditor *Editorleaf) {
+		km.BindKeyEvent(func(ev tcell.EventKey) (string, keychord.KeyDispatchTransition) {
+			switch ev.Str() {
+			case "y", "Y":
+				mb.Close()
+				e.saveFileNow()
+				if done != nil {
+					done()
+				}
+			case "n", "N":
+				mb.Close()
+				gecore.Echo.AddText("Not saved: " + base + " was changed on disk (ESC x reload-file reads it)").
+					WithStyle(theme.ColorEchoYellow)
+			}
+			return "", keychord.DispatchExecuted
+		})
+	})
+	mb.Start(session, func(result keychord.KeyDispatchTransition) {})
+}
+
+// If the file does not exist, a backup error will occur
+func (e *Editorleaf) saveFileNow() {
 	backupMessage := ""
 	if err := e.editBuffer.Backup(); err != nil {
 		backupMessage = " (" + err.Error() + ")"
@@ -413,6 +465,10 @@ func (e *Editorleaf) MoveCursorPrevLine() {
 
 // Move cursor to the end of the line.
 func (e *Editorleaf) MoveCursorEndOfLine() {
+	// The content may have been replaced (SetString) by something shorter than
+	// the old cursor position; the layout cache has no entry for such a column.
+	e.meta.ClampRowsPos(e.editBuffer)
+
 	// What index number in logic row?
 	indexOfLogicalRow := e.bsArray.GetIndexOfLogicalRow(e.meta.RowsPos.RowIndex, e.meta.RowsPos.ColIndex)
 
@@ -1029,9 +1085,22 @@ func (e *Editorleaf) CopyRegion() {
 // Delete start to stop bytes and push the bytes to undo-stack and kill-buffer
 // 開始から終了までのバイトを削除し、そのバイトを undo スタックと kill バッファにプッシュする
 func (e *Editorleaf) killRegion(start, stop editbuffer.RowsPos) {
-	removed := e.editBuffer.RemoveRegion(start, stop)
+	removed := e.deleteRegion(start, stop)
 	if removed == nil {
 		return
+	}
+
+	if err := killbuffer.KillBuffer.PushKillBuffer(removed.BytesArray(), e.editBuffer.GetNewLine().Bytes()); err != nil {
+		gecore.Echo.AddText(err.Error())
+	}
+}
+
+// deleteRegion removes [start, stop) like killRegion, with undo and boundary bookkeeping,
+// but without putting the text into the kill buffer.
+func (e *Editorleaf) deleteRegion(start, stop editbuffer.RowsPos) editbuffer.Rows_ {
+	removed := e.editBuffer.RemoveRegion(start, stop)
+	if removed == nil {
+		return nil
 	}
 
 	// Release Boundaries
@@ -1063,11 +1132,8 @@ func (e *Editorleaf) killRegion(start, stop editbuffer.RowsPos) {
 		Data:   removed,
 	}, true)
 
-	if err := killbuffer.KillBuffer.PushKillBuffer(removed.BytesArray(), e.editBuffer.GetNewLine().Bytes()); err != nil {
-		gecore.Echo.AddText(err.Error())
-	}
-
 	e.meta.RowsPos = start
+	return removed
 }
 
 // Kill region between last mark to cursor

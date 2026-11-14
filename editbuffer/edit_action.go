@@ -207,6 +207,19 @@ func (u *UndoStack) IsRedoEmpty() bool {
 	return u.index >= len(u.stack)
 }
 
+// Clear forgets all actions: there is nothing to undo or redo, and the
+// current state is the saved one. It is used when the buffer is replaced by
+// the file on disk.
+func (u *UndoStack) Clear() {
+	if u == nil {
+		return
+	}
+	clear(u.stack)
+	u.stack = u.stack[:0]
+	u.index = 0
+	u.saveMark = 0
+}
+
 // SetSavePoint marks the current position as the saved state.
 func (u *UndoStack) SetSavePoint() {
 	u.saveMark = u.index

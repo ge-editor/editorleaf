@@ -89,7 +89,10 @@ func (l *LeafType) CancelManager() *gecore.EventCancelManager {
 	return l.ctx.CancelManager // .Get("draw")
 }
 
-func (l *LeafType) Opener(destination, behavior string, flag tree.OpenerFlag, data any, f func(bool, error)) {
+// DispatchLeafRequest handles requests routed to the editor leaf type. OpenRequest is
+// delivered to the first Editorleaf found in the tree; destination,
+// behavior, and flag do not currently affect selection.
+func (l *LeafType) DispatchLeafRequest(destination, behavior string, flag tree.OpenerFlag, data any, f func(bool, error)) {
 
 	var e *Editorleaf
 	tree.ForEachLeafAll(func(leaf tree.Leaf) bool {
@@ -113,9 +116,8 @@ func (l *LeafType) Opener(destination, behavior string, flag tree.OpenerFlag, da
 	}
 }
 
-// openTarget implements tree.FileOpener.
-// It opens req.Path in this editor and, when req.Line is given, moves the
-// cursor there. The cursor is clamped to the buffer.
+// openTarget opens req.Path in this editor and, when req.Line is given, moves
+// the cursor there. The cursor is clamped to the buffer.
 func (e *Editorleaf) openTarget(req tree.OpenRequest) (bool, error) {
 	if _, err := e.OpenFile(req.Path); err != nil {
 		return true, err

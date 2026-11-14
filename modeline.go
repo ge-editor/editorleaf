@@ -42,7 +42,7 @@ func (e *Editorleaf) drawModeline() {
 	wsName := ""
 	ws := workspace.Current()
 	if ws != nil {
-		wsName = "[" + ws.Name
+		wsName = " [" + ws.Name
 	}
 	if e.viewArea.Width >= 80 {
 		tr := tree.CurrentRootTree()
@@ -70,7 +70,7 @@ func (e *Editorleaf) drawModeline() {
 		}
 	}
 
-	s := fmt.Sprintf(" %s %s ",
+	s := fmt.Sprintf(" %s %s",
 		readonlyModified, e.editBuffer.GetDispPath())
 	style = theme.ColorModelineInactive
 	if e.active {
@@ -84,12 +84,12 @@ func (e *Editorleaf) drawModeline() {
 	if b > 0 {
 		percent = e.meta.RowsPos.RowIndex * 100 / b
 	}
-	s = fmt.Sprintf(" L%d%% (%d,%d) ",
+	s = fmt.Sprintf(" L%d%% (%d,%d)",
 		percent,
 		e.meta.RowsPos.RowIndex+1, e.meta.ModelineCx)
 	style = theme.ColorModelineInactive
 	if e.active {
-		style = theme.ColorModeLineActive3
+		style = theme.ColorModeLineActive2
 	}
 	draw(s, style)
 
@@ -100,7 +100,7 @@ func (e *Editorleaf) drawModeline() {
 		(*e.editBuffer.GetLangMode()).Name())
 	style = theme.ColorModelineInactive
 	if e.active {
-		style = theme.ColorModeLineActive4
+		style = theme.ColorModeLineActive2
 	}
 	draw(s, style)
 
@@ -115,10 +115,9 @@ func (e *Editorleaf) drawModeline() {
 	draw(s, style)
 
 	// Fill the remaining area
-	// a := theme.ColorModelineInactive
 	style = theme.ColorModelineInactive
 	if e.active {
-		style = theme.ColorModeLineActive4
+		style = theme.ColorModeLineActive2
 	}
 	if w > 0 {
 		e.screen.DrawString(x, y, w, strings.Repeat(" ", w), style)

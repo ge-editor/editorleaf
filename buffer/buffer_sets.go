@@ -8,9 +8,11 @@ import (
 	"slices"
 	"unicode/utf8"
 
+	"github.com/ge-editor/editorleaf/diagnostic"
 	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/editorleaf/syntax"
 	"github.com/ge-editor/gecore/screen"
+	"github.com/ge-editor/gecore/state"
 	"github.com/ge-editor/utils"
 )
 
@@ -87,8 +89,32 @@ func NewBufferSetsFromStdin(paths []string, stdinName string, stdin []byte) (bss
 	return bss, errs
 }
 
-// Buffers
+// BufferSets holds the buffer sets of the open files in order of use: the
+// most recently used first. A new buffer set is added at the end, because it
+// has not been used yet, and moves to the front when its buffer is shown
+// (Touch). Code that needs "the buffer to go back to" (closing a buffer) takes
+// the first one; the buffer list shows the sets in this order.
 type BufferSets []*bufferSet
+
+// Touch marks the buffer ff as the most recently used: its buffer set moves
+// to the front, and the others keep their order. It does nothing when ff is
+// not in the BufferSets (the buffer of a minibuffer, for example).
+func (bss *BufferSets) Touch(ff *editbuffer.EditBuffer) {
+	if bss == nil {
+		return
+	}
+	i := bss.GetIndexByBufferFile(ff)
+	if i < 0 {
+		return
+	}
+	if i > 0 {
+		utils.MoveToFront(*bss, i)
+	}
+	// A file that is shown is a recently opened file (ESC x recent-open).
+	if p := ff.GetPath(); p != "" {
+		state.RecordRecentFile(p)
+	}
+}
 
 // SetStartPosition sets where the cursor starts when the buffer of path is
 // first shown (command line "+LINE[:COLUMN] path"). line and col are 1-based,
@@ -256,8 +282,11 @@ func (bss *BufferSets) Contains(path string) bool {
 	return false
 }
 
+// Append adds buffSet at the end: it has not been used yet. It moves to the
+// front when its buffer is shown (Touch).
 func (bss *BufferSets) Append(buffSet *bufferSet) {
 	*bss = append(*bss, buffSet)
+	notifyAppend(buffSet.EditBuffer)
 }
 
 /*
@@ -280,7 +309,10 @@ func (bss *BufferSets) RemoveByBufferFile(ff *editbuffer.EditBuffer) int {
 		return -1
 	}
 
-	// The buffer is gone: stop its syntax Worker (parser + tree).
+	// The buffer is gone: tell the observers (the language servers) and
+	// stop its syntax Worker (parser + tree).
+	notifyRemove(ff)
+	diagnostic.Release(ff)
 	syntax.Release(ff)
 	*bss = slices.Delete(*bss, i, i+1)
 	return i

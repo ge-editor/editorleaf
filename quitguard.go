@@ -11,6 +11,7 @@ package editorleaf
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/gdamore/tcell/v3"
 
@@ -25,7 +26,11 @@ import (
 // implements QuitGuardResolver interface
 // in gecore/quitguard_manager.go
 type quitGuard struct {
-	bufferSets   *buffer.BufferSets
+	bufferSets *buffer.BufferSets
+	// snapshot is the list of buffer sets taken when the questions start.
+	// BufferSets changes its order whenever a buffer is used, so the
+	// questions go through a copy, by index.
+	snapshot     buffer.BufferSets
 	currentIndex int
 
 	MinibufferManager *MinibufferManagerStruct
@@ -67,6 +72,7 @@ func (qg *quitGuard) Draw() bool {
 
 func (qg *quitGuard) ConfirmFunc() {
 	qg.currentIndex = 0
+	qg.snapshot = slices.Clone(*qg.bufferSets)
 	qg.askNext()
 }
 
@@ -90,13 +96,13 @@ func findMetaInTree(killTargetBuf *editbuffer.EditBuffer) *buffer.Meta {
 }
 
 func (qg *quitGuard) askNext() {
-	if qg.currentIndex >= len(*qg.bufferSets) {
+	if qg.currentIndex >= len(qg.snapshot) {
 		qg.MinibufferManager.Close()
 		gecore.QuitGuardManager.HandleNextResolver()
 		return
 	}
 
-	buffSet := (*qg.bufferSets)[qg.currentIndex]
+	buffSet := qg.snapshot[qg.currentIndex]
 
 	// Saves the state of the first editorleaf found in the tree.
 	meta := findMetaInTree(buffSet.EditBuffer)
@@ -119,13 +125,32 @@ func (qg *quitGuard) askNext() {
 	}
 
 	base := buffSet.GetBase()
+	// Looked at now, not from an earlier check: the file may have been
+	// changed by another program while ge was open.
+	changedOnDisk := buffSet.DiskDiffers()
 	prompt := fmt.Sprintf("Save modified buffer %s? [y/n]: ", base)
+	if changedOnDisk {
+		prompt = fmt.Sprintf("Save modified buffer %s? It was changed on disk after it was read; saving overwrites it. [y/n]: ", base)
+	}
 
 	mbSession := NewSession(prompt, func(km *keychord.RootNode, miniEditor *Editorleaf) {
 		km.BindKeyEvent(func(ev tcell.EventKey) (string, keychord.KeyDispatchTransition) {
 			// gelog.Info("bindkey")
 			switch ev.Str() {
 			case "y", "Y":
+				// The file may have been changed while the question was
+				// open: ask again, now with the warning.
+				if !changedOnDisk && buffSet.DiskDiffers() {
+					qg.MinibufferManager.Close()
+					qg.askNext()
+					return "", keychord.DispatchExecuted
+				}
+				// The version on disk is kept by the backup.
+				if changedOnDisk {
+					if err := buffSet.Backup(); err != nil {
+						gecore.Echo.AddText("⚠ backup: " + err.Error() + " " + base).WithStyle(theme.ColorEchoYellow)
+					}
+				}
 				// save
 				_, err := buffSet.Save()
 				if err != nil {

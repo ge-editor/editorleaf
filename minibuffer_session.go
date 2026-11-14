@@ -16,10 +16,29 @@ const (
 )
 
 type Session struct {
+	// Editor is the editor that gets the keys: the only one of a plain
+	// session, the focused field of a form.
 	Editor      *Editorleaf
 	Prompt      string
 	PromptWidth int
 	Mode        Mode
+
+	// A form has a header line and several fields, each with its own
+	// editor (multi-line, soft-wrapped, scrolled by itself) and label.
+	// Fields is nil for a plain session.
+	Fields []*Field
+	Focus  int
+	// Header returns the text of the header line, for example the check
+	// boxes of a search. It is called at every draw.
+	Header func() string
+}
+
+// Field is one input of a form session.
+type Field struct {
+	Label      string
+	LabelWidth int
+	Editor     *Editorleaf
+	Hidden     bool // a hidden field takes no room and gets no focus
 }
 
 func NewSession(
@@ -49,4 +68,77 @@ func NewSession(
 func (s *Session) SetPrompt(prompt string) {
 	s.Prompt = prompt
 	s.PromptWidth = utils.WidthOnScreen([]byte(prompt))
+}
+
+// NewFormSession makes a session with a header line and one field per label.
+// bind is called once per field to map the keys of that field's editor.
+func NewFormSession(
+	labels []string,
+	bind func(field int, km *keychord.RootNode, editor *Editorleaf),
+) *Session {
+	s := &Session{Mode: ModeMinibuffer}
+
+	labelWidth := 0
+	for _, l := range labels {
+		labelWidth = max(labelWidth, utils.WidthOnScreen([]byte(l)))
+	}
+
+	for i, l := range labels {
+		i := i
+		sub := NewSession(l, func(km *keychord.RootNode, editor *Editorleaf) {
+			bind(i, km, editor)
+		})
+		sub.Editor.Active(false)
+		s.Fields = append(s.Fields, &Field{Label: l, LabelWidth: labelWidth, Editor: sub.Editor})
+	}
+
+	s.Focus = 0
+	s.Editor = s.Fields[0].Editor
+	s.Editor.Active(true)
+	return s
+}
+
+// SetFocus moves the keys to field i. A hidden or missing field is ignored.
+func (s *Session) SetFocus(i int) {
+	if i < 0 || i >= len(s.Fields) || s.Fields[i].Hidden {
+		return
+	}
+	s.Editor.Active(false)
+	s.Focus = i
+	s.Editor = s.Fields[i].Editor
+	s.Editor.Active(true)
+}
+
+// FocusNext moves the focus to the next visible field, round.
+func (s *Session) FocusNext() {
+	n := len(s.Fields)
+	for k := 1; k < n; k++ {
+		if i := (s.Focus + k) % n; !s.Fields[i].Hidden {
+			s.SetFocus(i)
+			return
+		}
+	}
+}
+
+// SetHidden shows or hides field i. If the focused field is hidden the focus
+// goes to the first field.
+func (s *Session) SetHidden(i int, hidden bool) {
+	if i < 0 || i >= len(s.Fields) {
+		return
+	}
+	s.Fields[i].Hidden = hidden
+	if hidden && s.Focus == i {
+		s.SetFocus(0)
+	}
+}
+
+// deactivate takes the focus away from every editor of the session.
+func (s *Session) deactivate() {
+	if s.Fields == nil {
+		s.Editor.Active(false)
+		return
+	}
+	for _, f := range s.Fields {
+		f.Editor.Active(false)
+	}
 }

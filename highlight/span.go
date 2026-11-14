@@ -18,9 +18,11 @@ spell check
 const (
 	LayerSyntax    = iota // buffer
 	LayerSemantic         // buffer
+	LayerDiagnostic       // buffer, LSP diagnostics (above syntax, below search)
 	LayerSearch           // meta
 	LayerSelection        // meta
 	LayerCursor           // meta, multi cursor
+	LayerMark             // meta, marks of the file. Painted over the syntax color by the editor; FindHighlightSpan skips it
 )
 
 type Span struct {

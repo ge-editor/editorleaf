@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/gdamore/tcell/v3"
 
@@ -107,11 +108,36 @@ type Editorleaf struct {
 	// Called and cleared in WillCloseTreesitter.
 	syntaxUnsubscribe func()
 
+	// diagnosticUnsubscribe removes this editor's HighlightLayer from the
+	// diagnostics of its buffer (package diagnostic). Subscribed and
+	// cleared together with syntaxUnsubscribe.
+	diagnosticUnsubscribe func()
+
+	// searchUnsubscribe removes the listener that makes the search results
+	// follow the edits of the buffer. Subscribed and cleared together with
+	// syntaxUnsubscribe.
+	searchUnsubscribe func()
+
 	bsArray BoundariesArray // boundaries array of logical row
 
 	keyDispatcher *keychord.RootNode
 
 	lineNumberWidth int
+
+	// cursorLineRow1 is the edit-area row (relative, 1-based; 0 = none) of
+	// the logical row that has the cursor, in the draw in progress. Cells on
+	// it get the cursor-line background (see cursorLineStyle). It is 1-based
+	// so that the zero value of a new Editorleaf means "no cursor line".
+	cursorLineRow1 int
+
+	// markKey is the state the LayerMark spans were last built from.
+	markKey markHighlightKey
+
+	// multi is the multicursor mode of this editor (see multicursor.go).
+	multi multiCursor
+	// multiHideCursor is non-zero while the real cursor is hidden. It is
+	// read by the draw goroutine, so it is accessed with sync/atomic.
+	multiHideCursor int32
 
 	locale locale.Locale // Locale interface
 
@@ -128,6 +154,7 @@ func (e *Editorleaf) DispatchKey(ev tcell.EventKey) (string, keychord.KeyDispatc
 		return "", keychord.DispatchNotFound
 	}
 
+	before := e.meta.RowsPos
 	s, res := e.keyDispatcher.Dispatch(ev)
 	switch res {
 	case keychord.DispatchNotFound:
@@ -139,6 +166,11 @@ func (e *Editorleaf) DispatchKey(ev tcell.EventKey) (string, keychord.KeyDispatc
 	case keychord.DispatchPrefix:
 	case keychord.DispatchExecuted:
 	case keychord.DispatchInvalidAfterPrefix:
+	}
+
+	// The cursor arrived somewhere: show the diagnostic that is there.
+	if e.meta.RowsPos != before { // e.meta is never nil (see setBuffer)
+		e.echoDiagnosticAtCursor()
 	}
 
 	return s, res
@@ -237,7 +269,9 @@ func (e *Editorleaf) Kill(leaf tree.Leaf, isActive bool) tree.Leaf {
 		}
 		bufferSetsIndexForReplace = BufferSets.GetIndexByBufferFile(eb)
 	} else {
-		bufferSetsIndexForReplace = l - 1
+		// BufferSets is in order of use, the most recently used first: go
+		// back to the buffer that was used before the closed one.
+		bufferSetsIndexForReplace = 0
 	}
 
 	for _, e := range toReplace {
@@ -252,6 +286,12 @@ func (e *Editorleaf) Kill(leaf tree.Leaf, isActive bool) tree.Leaf {
 
 func (e *Editorleaf) Active(a bool) {
 	e.active = a
+	if a {
+		// The buffer of the leaf that gets the focus is the most recently
+		// used one (this does nothing for a buffer that is not in BufferSets,
+		// such as the minibuffer's).
+		BufferSets.Touch(e.editBuffer)
+	}
 }
 
 func (e *Editorleaf) IsActive() bool {
@@ -294,7 +334,7 @@ const (
 	DELETE
 )
 
-// syncEdits adjusts cursor positions and buffer boundaries based on the type of edit (insert or delete).
+// syncCursorAndBufferForEdit adjusts cursor positions and buffer boundaries based on the type of edit (insert or delete).
 func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbuffer.RowsPos) {
 	// Ensure start is before end; swap if necessary.
 	if start.RowIndex > end.RowIndex || (start.RowIndex == end.RowIndex && start.ColIndex > end.ColIndex) {
@@ -345,6 +385,9 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 		if editor.editBuffer != e.editBuffer {
 			return true
 		}
+
+		// The cursors of the multicursor mode stay at the same text.
+		editor.adjustMultiCursors(sync, start, end)
 
 		// Adjust foundIndex that is results of search and replace
 		/*
@@ -460,7 +503,9 @@ func (e *Editorleaf) GetBuffersFilterByCharacters(chars string) *buffer.BufferSe
 	items := buffer.BufferSets{}
 	b := BufferSets
 	//gelog.Info("****** FilterByCharacters", "len", len(*m))
-	for i := len(*b) - 1; i >= 0; i-- {
+	// BufferSets is in order of use, so the list shows the most recently used
+	// buffer first.
+	for i := 0; i < len(*b); i++ {
 		mk := (*b)[i]
 		text := mk.GetBase()
 		/* 		if text == "*minibuffer*" {
@@ -538,7 +583,12 @@ func (e *Editorleaf) drawCursorAt(x, y int) {
 		hangingIndentWidth = e.bsArray.GetHangingIndentWidth(e.meta.RowsPos.RowIndex)
 	}
 	if e.active {
-		e.screen.ShowCursor(e.editArea.X+x+e.lineNumberWidth+hangingIndentWidth, e.editArea.Y+y)
+		if atomic.LoadInt32(&e.multiHideCursor) != 0 {
+			// Only the cursors of the multicursor mode are shown.
+			e.screen.Screen.ShowCursor(-1, -1)
+		} else {
+			e.screen.ShowCursor(e.editArea.X+x+e.lineNumberWidth+hangingIndentWidth, e.editArea.Y+y)
+		}
 	}
 }
 
@@ -549,6 +599,8 @@ func (e *Editorleaf) setCellInEditArea(x, y int, style tcell.Style, ch rune, chW
 	}
 
 	px := x + e.editArea.X + e.lineNumberWidth
+
+	style = e.cursorLineStyle(x, y, chWidth, style)
 
 	e.screen.SetContent(px, y+e.editArea.Y, ch, nil, style)
 	// Wide char and Tab
@@ -587,6 +639,14 @@ func (e *Editorleaf) fillInEditArea(
 
 	overflowStyle := style.Background(theme.ColorColumnLimitOverflowBackground)
 
+	// The cursor row: the background is the cursor-line color, and the
+	// area beyond the recommended column width has its own.
+	if rect.Height == 1 && rect.Y == e.cursorLineRow1-1 &&
+		style.Background(theme.ColorDefaultBackground) == style {
+		style = style.Background(theme.ColorCursorLineBackground)
+		overflowStyle = style.Background(theme.ColorCursorLineColumnOverBackground)
+	}
+
 	// Recommended Column Width 桁 以内
 	if e.mode == ModeMinibuffer || rect.X+rect.Width <= columnLimit {
 		rect.X = screenX
@@ -597,8 +657,6 @@ func (e *Editorleaf) fillInEditArea(
 
 	// Over Recommended Column Width
 	if e.mode != ModeMinibuffer && rect.X >= columnLimit {
-		overflowStyle = style.Background(theme.ColorColumnLimitOverflowBackground)
-
 		rect.X = screenX
 		rect.Y = screenY
 		e.screen.FillRect(rect, r, overflowStyle)
@@ -687,6 +745,9 @@ func (e *Editorleaf) drawEditorleaf(ctx context.Context) bool {
 
 	Width, Height := e.editArea.Width, e.editArea.Height
 
+	// Keep the spans of the marks (highlight.LayerMark) up to date.
+	e.refreshMarkHighlights()
+
 	// Cursor position in draw view
 	_, Cy := e.meta.ScreenPos.Col, e.meta.ScreenPos.Row // ...
 
@@ -759,6 +820,13 @@ func (e *Editorleaf) drawEditorleaf(ctx context.Context) bool {
 
 	}
 	// gecore.Echo.AddText(fmt.Sprintf("(Cy,Cx:%d,%d)", Cy, Cx))
+
+	// The logical row of the cursor is drawn with a background color.
+	if e.mode == ModeEditor {
+		e.cursorLineRow1 = Cy + 1
+	} else {
+		e.cursorLineRow1 = 0
+	}
 
 	// Cursor row
 	rowIndex := e.meta.RowsPos.RowIndex
@@ -1105,9 +1173,6 @@ func (e *Editorleaf) drawLineWithCompute(
 	if rowIndex == e.meta.RowsPos.RowIndex {
 		cursorLineY = cursorLogicalCY + startScreenY
 	}
-	isUnderline := func() bool {
-		return sy == cursorLineY
-	}
 
 	/* ctx := e.parentLeafType.CancelManager().Get("draw")
 	if ctx == nil {
@@ -1171,7 +1236,6 @@ func (e *Editorleaf) drawLineWithCompute(
 				isNoSpanStyle = false
 			}
 		}
-		currentCell.Style = currentCell.Style.Underline(isUnderline())
 
 		if sx+currentCell.Width >= contentWidth-rightEdgeWrapMargin && locale.IsBreakpoint(prevPrevCell, prevCell, currentCell) { // ★★
 			breakpoint = Boundary{
@@ -1206,7 +1270,7 @@ func (e *Editorleaf) drawLineWithCompute(
 							Y:      sy,
 							Width:  contentWidth - (sx + currentCell.Width),
 							Height: 1,
-						}, '*', theme.ColorDefault.Underline(isUnderline()))
+						}, '*', theme.ColorDefault)
 					*/
 				}
 			} else if breakpoint.IsEmpty() {
@@ -1222,7 +1286,7 @@ func (e *Editorleaf) drawLineWithCompute(
 					})
 					startLogicalRowByteIndex = bytePosOfRow - prevCell.Size // 次の論理行開始位置 byte index
 					if isDraw {
-						s := theme.ColorMarkContinue.Underline(isUnderline())
+						s := theme.ColorMarkContinue
 						if isNoSpanStyle && e.isColumnOver(sx-prevCell.Width, sy, currentCell.Width) {
 							s = s.Background(theme.ColorColumnLimitOverflowBackground)
 						}
@@ -1232,13 +1296,13 @@ func (e *Editorleaf) drawLineWithCompute(
 							Y:      sy,
 							Width:  contentWidth - (sx - prevCell.Width - 1),
 							Height: 1,
-						}, 0, theme.ColorDefault.Underline(isUnderline()))
+						}, 0, theme.ColorDefault)
 					}
 					// Next logical row
 					sy++
 					sx = 0 + hangingIndentWidth
 					wrapped = true
-					s := prevCell.Style.Underline(isUnderline())
+					s := prevCell.Style
 					if locale.Is(prevCell, locale.CONTROLCODE) {
 						cacheCellInfo(&runeWidth, bytePosOfRow-prevCell.Size,
 							prevCell.Ch, s, 1, 1, prevCell.Class,
@@ -1254,11 +1318,10 @@ func (e *Editorleaf) drawLineWithCompute(
 						// gelog.Debug("折り返した後の情報で再設定")
 						// 折り返した後の情報で再設定
 						// Color column limit overflow background
-						s := prevCell.Style.Underline(false)
+						s := prevCell.Style
 						if s == theme.ColorDefault.Background(theme.ColorColumnLimitOverflowBackground) {
 							s = theme.ColorDefault
 						}
-						s = s.Underline(isUnderline())
 						cacheCellInfo(&runeWidth, bytePosOfRow-prevCell.Size,
 							prevCell.Ch, s, prevCell.Size, prevCell.Width, prevCell.Class,
 							sy-startScreenY, sx, hangingIndentWidth)
@@ -1272,7 +1335,7 @@ func (e *Editorleaf) drawLineWithCompute(
 						}
 					}
 					sx += prevCell.Width
-					s = currentCell.Style.Underline(isUnderline())  // ★★
+					s = currentCell.Style // ★★
 					if locale.Is(currentCell, locale.CONTROLCODE) { // ★★
 						// これを確認する必要があるか？
 						cacheCellInfo(&runeWidth, bytePosOfRow,
@@ -1309,7 +1372,7 @@ func (e *Editorleaf) drawLineWithCompute(
 					})
 					startLogicalRowByteIndex = bytePosOfRow
 					if isDraw {
-						s := theme.ColorMarkContinue.Underline(isUnderline())
+						s := theme.ColorMarkContinue
 						if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
 							s = s.Background(theme.ColorColumnLimitOverflowBackground)
 						}
@@ -1320,13 +1383,13 @@ func (e *Editorleaf) drawLineWithCompute(
 								Y:      sy,
 								Width:  contentWidth - (sx + 1),
 								Height: 1,
-							}, '@', theme.ColorDefault.Underline(isUnderline()))
+							}, '@', theme.ColorDefault)
 						*/
 					}
 					sy++
 					sx = 0 + hangingIndentWidth
 					wrapped = true
-					s := currentCell.Style.Underline(isUnderline()) // ★★
+					s := currentCell.Style // ★★
 					if locale.Is(currentCell, locale.CONTROLCODE) { // ★★
 						cacheCellInfo(&runeWidth, bytePosOfRow,
 							currentCell.Ch, currentCell.Style, 1, 1, currentCell.Class,
@@ -1357,14 +1420,14 @@ func (e *Editorleaf) drawLineWithCompute(
 				bytePosOfRow = breakpoint.StopLogicalRowByteIndex
 				sx = breakpoint.LogicalRowWidth
 				if isDraw {
-					s := theme.ColorMarkContinue.Underline(isUnderline())
+					s := theme.ColorMarkContinue
 					if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
 						s = s.Background(theme.ColorColumnLimitOverflowBackground)
 					}
 					e.setCellInEditArea(sx, sy, s, theme.MarkContinue, 1)
 					e.fillInEditArea(screen.Rect{X: sx + 1, Y: sy, // 必要
 						Width: contentWidth - (sx + 1), Height: 1},
-						0, theme.ColorDefault.Underline(isUnderline()))
+						0, theme.ColorDefault)
 				}
 				sy++
 				sx = 0 + hangingIndentWidth
@@ -1380,7 +1443,7 @@ func (e *Editorleaf) drawLineWithCompute(
 					e.fillInEditArea(screen.Rect{X: 0, Y: sy, // 必要
 						Width:  hangingIndentWidth,
 						Height: 1},
-						0, theme.ColorDefault.Underline(isUnderline()))
+						0, theme.ColorDefault)
 					wrapped = false
 				}
 
@@ -1410,7 +1473,7 @@ func (e *Editorleaf) drawLineWithCompute(
 						Y:      sy,
 						Width:  contentWidth - (sx + currentCell.Width),
 						Height: 1,
-					}, 0, theme.ColorDefault.Underline(isUnderline()))
+					}, 0, theme.ColorDefault)
 				}
 				sy++
 			}
@@ -1423,7 +1486,7 @@ func (e *Editorleaf) drawLineWithCompute(
 			e.fillInEditArea(screen.Rect{X: 0, Y: sy,
 				Width:  hangingIndentWidth,
 				Height: 1},
-				0, theme.ColorDefault.Underline(isUnderline()))
+				0, theme.ColorDefault)
 			wrapped = false
 		}
 
@@ -1441,6 +1504,11 @@ func (e *Editorleaf) drawLineWithCompute(
 	// Line number
 	if isDraw && e.mode != ModeMinibuffer {
 		e.drawLineNumber(rowIndex, startScreenY, cursorLineY, len(bo))
+	}
+
+	// Trailing whitespace and marks
+	if isDraw {
+		e.paintRowOverlays(rowIndex, startScreenY, runeWidth, hangingIndentWidth)
 	}
 
 	//
@@ -1546,7 +1614,7 @@ func (e *Editorleaf) drawLine(
 			}
 			// isNoSpanStyle = false
 		}
-		runeWidthCache[bytePos].Style = style // cache 更新 (underline は描画時に付与)
+		runeWidthCache[bytePos].Style = style // cache 更新 (cursor line / mark / 行末空白の背景は描画時に付与)
 		// return isNoSpanStyle
 	}
 
@@ -1566,20 +1634,14 @@ func (e *Editorleaf) drawLine(
 
 	for logicalRowIndex := startLogicalRowIndex; logicalRowIndex < logicalRowLen; logicalRowIndex++ {
 
-		underline := sy == cursorLineY
-
 		// Fill Hanging Indent Width
 		if logicalRowIndex > 0 && hangingIndentWidth > 0 {
-			style := theme.ColorDefault.Underline(underline)
-			if underline {
-				style = style.Underline(underline)
-			}
 			e.fillInEditArea(screen.Rect{
 				X:      0,
 				Y:      sy,
 				Width:  hangingIndentWidth,
 				Height: 1,
-			}, 0, style)
+			}, 0, theme.ColorDefault)
 		}
 
 		bo := e.bsArray.Boundary(rowIndex, logicalRowIndex)
@@ -1604,9 +1666,6 @@ func (e *Editorleaf) drawLine(
 
 			cell := runeWidthCache[bytePosOfRow] // 更新後の値を読む
 			style := cell.Style
-			if underline {
-				style = style.Underline(underline)
-			}
 
 			if locale.Is(cell, locale.CONTROLCODE) {
 				if cell.Style == theme.ColorControlCode && e.isColumnOver(sx, sy, cell.Width) {
@@ -1652,9 +1711,6 @@ func (e *Editorleaf) drawLine(
 
 		if logicalRowIndex < logicalRowLen-1 {
 			style := theme.ColorMarkContinue
-			if underline {
-				style = style.Underline(underline)
-			}
 
 			if e.isColumnOver(sx, sy, 1) {
 				style = style.Background(theme.ColorColumnLimitOverflowBackground)
@@ -1663,16 +1719,12 @@ func (e *Editorleaf) drawLine(
 			sx += 1
 		}
 
-		style := theme.ColorDefault
-		if underline {
-			style = style.Underline(underline)
-		}
 		e.fillInEditArea(screen.Rect{
 			X:      sx,
 			Y:      sy,
 			Width:  contentWidth - sx,
 			Height: 1,
-		}, 0, style)
+		}, 0, theme.ColorDefault)
 
 		sy++
 		sx = 0 + hangingIndentWidth
@@ -1686,6 +1738,9 @@ func (e *Editorleaf) drawLine(
 	if useLatestHighlight && completed && startLogicalRowIndex == 0 {
 		e.bsArray.rows[rowIndex].HighlightStamp = wantStamp
 	}
+
+	// Trailing whitespace and marks
+	e.paintRowOverlays(rowIndex, startScreenY, runeWidthCache, hangingIndentWidth)
 
 	// Line number
 	if e.mode != ModeMinibuffer {
@@ -1707,12 +1762,12 @@ func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, h i
 			Height: h},
 			0, theme.ColorLineNumber)
 
-		// Underline on line number area
+		// Cursor row on line number area
 		if cursorLineY != -1 {
 			e.screen.FillRect(screen.Rect{X: e.editArea.X, Y: e.editArea.Y + cursorLineY,
 				Width:  e.lineNumberWidth,
 				Height: 1},
-				0, theme.ColorLineNumber.Underline(true))
+				0, theme.ColorLineNumber.Background(theme.ColorCursorLineNumberBackground))
 		}
 	}
 
@@ -1727,7 +1782,7 @@ func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, h i
 		}
 
 		if startScreenY == cursorLineY {
-			style = style.Underline(true)
+			style = style.Background(theme.ColorCursorLineNumberBackground)
 		}
 
 		e.drawLineNumberNumber(
@@ -1756,9 +1811,14 @@ func (e Editorleaf) FindHighlightSpan(
 	stat *highlightPosStatus,
 ) (*highlight.Span, highlightPosStatus, bool) {
 
-	maxPriority := e.meta.HighlightLayer.MaxPriority()
+	// LayerMark is not a text style: the marks are painted over the cells
+	// afterwards (paintRowOverlays), so the syntax color stays.
+	maxPriority := min(e.meta.HighlightLayer.MaxPriority(), highlight.LayerMark-1)
 
 	for priorityIndex := maxPriority; priorityIndex >= 0; priorityIndex-- {
+		if priorityIndex == highlight.LayerCursor {
+			continue // the cursors of the multicursor mode: see paintRowOverlays
+		}
 		// meta と editor は同じ HighlightsLayer を参照しているため 1 回だけ調べる。
 		const layerIndex = highlightMeta
 		hl := e.meta.HighlightLayer.Peek(priorityIndex)

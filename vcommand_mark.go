@@ -10,6 +10,7 @@ import (
 	"github.com/ge-editor/editorleaf/mark"
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/gecore/marks"
+	"github.com/ge-editor/gecore/pathscope"
 	"github.com/ge-editor/gecore/tree"
 	"github.com/ge-editor/gecore/workspace"
 	"github.com/ge-editor/gelog"
@@ -24,13 +25,16 @@ func (e *Editorleaf) MoveToMarkPosition(m *mark.Mark) {
 
 // sameMarkFile reports whether a mark's file is the file of the buffer. It is
 // called for every mark on every edit, so the paths are compared as strings
-// first and the file system is asked only when the base names agree. It also
-// works for a file that does not exist yet (IsSameFile compares the paths).
+// first and the file system is asked only when the base names agree. The base
+// names are compared ignoring case here, because on a file system that ignores
+// case "Foo.go" and "foo.go" are one file; IsSameFile then decides, so on a
+// case-sensitive file system they stay two files. It also works for a file
+// that does not exist yet (IsSameFile compares the paths).
 func sameMarkFile(markPath, bufferPath string) bool {
 	if markPath == bufferPath {
 		return true
 	}
-	if filepath.Base(markPath) != filepath.Base(bufferPath) {
+	if !strings.EqualFold(filepath.Base(markPath), filepath.Base(bufferPath)) {
 		return false
 	}
 	return utils.IsSameFile(markPath, bufferPath)
@@ -64,39 +68,70 @@ func toEditorMark(a marks.Mark) *mark.Mark {
 	}
 }
 
+// SetMarkAtCursor sets a mark at the cursor, or unsets the marks that are
+// there.
+//
+// A mark is "there" when it is in the same file at the same position,
+// whatever its scope (workspace, root tree) and its ID are. The marks of
+// other scopes are in the same list, and marks that were saved or imported
+// more than once are in it more than once. If only one of them were removed,
+// the next call would find another and the position could never be cleared,
+// so all of them are removed together.
 func (e *Editorleaf) SetMarkAtCursor() {
-	label := e.getContentWidthoutSpecialCharactor(e.meta.RowsPos, 20)
-	newMark := mark.NewMark(e.editBuffer.GetPath(), e.meta.RowsPos, label)
+	path := e.editBuffer.GetPath()
+	pos := e.meta.RowsPos
 
-	// gelog.Debug("marks.Marks.Items()", marks.Marks.Items())
-
+	var ids []string
 	for _, a := range marks.Marks.Items() {
 		existing := toEditorMark(a)
-		if existing == nil {
+		if existing == nil || existing.ExtraData == nil {
 			continue
 		}
-
-		if !mark.Equals(existing, newMark) {
+		if existing.RowsPos != pos || !sameMarkFile(existing.FilePath, path) {
 			continue
 		}
+		ids = append(ids, a.GetID())
+	}
 
-		gecore.Echo.AddText("Unset mark").WithStyle(theme.ColorEchoRed)
-		marks.Marks.Remove(a)
+	if len(ids) > 0 {
+		n := marks.Marks.RemoveByIDs(ids...)
+		msg := "Unset mark"
+		if n > 1 {
+			msg = fmt.Sprintf("Unset mark (%d duplicates)", n)
+		}
+		gecore.Echo.AddText(msg).WithStyle(theme.ColorEchoRed)
 		return
 	}
 
+	label := e.getContentWidthoutSpecialCharactor(pos, 20)
 	gecore.Echo.AddText("Set mark").WithStyle(theme.ColorEchoGreen)
-	marks.Marks.Add(newMark)
+	marks.Marks.Add(mark.NewMark(path, pos, label))
+}
+
+// lastMarkOfFile returns the newest mark of the file (the marks are kept
+// newest first), or nil. This is the one place that decides which mark is
+// "the last mark": the region commands (M-w, C-w, ...) and the orange
+// highlight (refreshMarkHighlights) must agree. Marks that were loaded from
+// marks.json are StoredMarks, so they are converted with toEditorMark, and
+// the file is compared with sameMarkFile as it is for the highlight.
+func lastMarkOfFile(path string) *mark.Mark {
+	return lastMarkIn(marks.Marks.Items(), path)
+}
+
+// lastMarkIn is lastMarkOfFile for a given list of marks (newest first).
+func lastMarkIn(items []marks.Mark, path string) *mark.Mark {
+	for _, a := range items {
+		m := toEditorMark(a)
+		if m == nil || m.ExtraData == nil || !sameMarkFile(m.FilePath, path) {
+			continue
+		}
+		return m
+	}
+	return nil
 }
 
 func (e *Editorleaf) findLastByEditBuffer() *mark.Mark {
-	for _, a := range marks.Marks.Items() {
-		lastMark, ok := a.(*mark.Mark)
-		if ok && utils.IsSameFile(lastMark.FilePath, e.editBuffer.GetPath()) {
-			return lastMark
-		}
-	}
-	return nil
+	return lastMarkOfFile(e.editBuffer.GetPath())
 }
 
 var tmpMarkPos *mark.Mark
@@ -122,17 +157,43 @@ func (e *Editorleaf) SwapCursorAndMark() {
 	}
 }
 
-func (e *Editorleaf) FilterByCharacters(chars string) []*mark.Mark {
-	items := []*mark.Mark{}
+// FilterMarks lists the marks for the Mark mode. m restricts the marks to a
+// PathScope (nil: no restriction): a mark is in the scope when its workspace
+// ID or its file matches (see pathscope.Matcher). chars is the text filter and
+// is applied to the marks in the scope.
+//
+// total is the number of all marks and inScope the number of marks in the
+// scope, both before the text filter.
+func (e *Editorleaf) FilterMarks(chars string, m *pathscope.Matcher) (items []*mark.Mark, inScope, total int) {
+	return e.FilterMarksWith(chars, m, nil)
+}
+
+// FilterMarksWith is FilterMarks with the text that the text filter is
+// applied to given by textOf. nil means the file name and the label of the
+// mark as it was stored.
+func (e *Editorleaf) FilterMarksWith(chars string, m *pathscope.Matcher, textOf func(*mark.Mark) string) (items []*mark.Mark, inScope, total int) {
+	items = []*mark.Mark{}
+
+	if textOf == nil {
+		textOf = func(mk *mark.Mark) string {
+			return fmt.Sprintf("%s %s", filepath.Base(mk.FilePath), utils.RemoveSymbols(mk.Label))
+		}
+	}
 
 	for _, a := range marks.Marks.Items() {
 		mk := toEditorMark(a)
 		if mk == nil {
 			continue
 		}
+		total++
+		if m != nil && !m.Match(mk.WorkspaceID, mk.FilePath) {
+			continue
+		}
+		inScope++
 
-		// text := fmt.Sprintf("%s %s", mk.EditBuffer.GetBase(), utils.RemoveSymbols(mk.Label))
-		text := fmt.Sprintf("%s %s", filepath.Base(mk.FilePath), utils.RemoveSymbols(mk.Label))
+		// textOf is called for every mark in the scope (also without a text
+		// filter): the caller may collect what it needs for the display.
+		text := textOf(mk)
 		if chars != "" {
 			if utils.ContainsAllCharacters(text, chars) {
 				items = append(items, mk)
@@ -142,6 +203,13 @@ func (e *Editorleaf) FilterByCharacters(chars string) []*mark.Mark {
 		}
 	}
 
+	return items, inScope, total
+}
+
+// FilterByCharacters lists the marks that match the text filter, in every
+// scope.
+func (e *Editorleaf) FilterByCharacters(chars string) []*mark.Mark {
+	items, _, _ := e.FilterMarks(chars, nil)
 	return items
 }
 
@@ -166,7 +234,7 @@ func (e *Editorleaf) OpenMarkPositionInCurrentBuffer(mk *mark.Mark) error {
 	return nil
 }
 
-// openMarkPosition prefers the workspace and RootTree recorded by the mark,
+// OpenMarkPosition prefers the workspace and RootTree recorded by the mark,
 // then uses the current workspace when the marked file is under one of its
 // directories, and finally falls back to the invoking editor.
 func (e *Editorleaf) OpenMarkPosition(mk *mark.Mark) error {
@@ -300,9 +368,8 @@ func pathIsInWorkspace(path string, w *workspace.Workspace) bool {
 	}
 	file := canonicalPath(path)
 	for _, dir := range w.Directories {
-		root := canonicalPath(dir)
-		rel, err := filepath.Rel(root, file)
-		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+		// IsWithinDir ignores case when the file system of the directory does.
+		if utils.IsWithinDir(file, canonicalPath(dir)) {
 			return true
 		}
 	}
@@ -310,26 +377,5 @@ func pathIsInWorkspace(path string, w *workspace.Workspace) bool {
 }
 
 func canonicalPath(path string) string {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return filepath.Clean(path)
-	}
-	abs = filepath.Clean(abs)
-	candidate := abs
-	var suffix []string
-	for {
-		if resolved, err := filepath.EvalSymlinks(candidate); err == nil {
-			for i := len(suffix) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, suffix[i])
-			}
-			return filepath.Clean(resolved)
-		}
-		parent := filepath.Dir(candidate)
-		if parent == candidate {
-			break
-		}
-		suffix = append(suffix, filepath.Base(candidate))
-		candidate = parent
-	}
-	return abs
+	return pathscope.CanonicalPath(path)
 }

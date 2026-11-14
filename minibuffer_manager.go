@@ -1,6 +1,7 @@
 package editorleaf
 
 import (
+	"bytes"
 	"context"
 
 	"github.com/gdamore/tcell/v3"
@@ -53,7 +54,7 @@ func (m *MinibufferManagerStruct) Close() {
 }
 
 func (m *MinibufferManagerStruct) Cancel() {
-	m.session.Editor.Active(false)
+	m.session.deactivate()
 	/* var leafEditor tree.Leaf
 	leafEditor = m.session.Editor
 	m.session.Editor.Kill(&leafEditor, false)
@@ -84,6 +85,48 @@ func (m *MinibufferManagerStruct) GetBytes() ([]byte, []int, error) {
 		return nil, nil, nil
 	}
 	return m.session.Editor.GetBytes()
+}
+
+// ---- form sessions ----
+
+// FieldBytes returns the content of field i of a form session (rows joined
+// with '\n').
+func (m *MinibufferManagerStruct) FieldBytes(i int) []byte {
+	if m.session == nil || i < 0 || i >= len(m.session.Fields) {
+		return nil
+	}
+	b, _, _ := m.session.Fields[i].Editor.GetBytes()
+	return b
+}
+
+// SetFieldString replaces the content of field i with content.
+func (m *MinibufferManagerStruct) SetFieldString(i int, content string) {
+	if m.session == nil || i < 0 || i >= len(m.session.Fields) {
+		return
+	}
+	rows, err := SplitRows([]byte(content))
+	if err != nil {
+		return
+	}
+	m.session.Fields[i].Editor.SetRows(rows)
+}
+
+func (m *MinibufferManagerStruct) FocusField(i int) {
+	if m.session != nil {
+		m.session.SetFocus(i)
+	}
+}
+
+func (m *MinibufferManagerStruct) FocusNextField() {
+	if m.session != nil {
+		m.session.FocusNext()
+	}
+}
+
+func (m *MinibufferManagerStruct) SetFieldHidden(i int, hidden bool) {
+	if m.session != nil {
+		m.session.SetHidden(i, hidden)
+	}
 }
 
 func (m *MinibufferManagerStruct) SetPrompt(prompt string) {
@@ -147,6 +190,9 @@ func (m *MinibufferManagerStruct) Resize(overlayRect screen.Rect) {
 // return Remaining height
 // overlayRect.Height: この値のみ画面の高さ
 func (m *MinibufferManagerStruct) MinibufferResize(overlayRect screen.Rect) int {
+	if m.session.Fields != nil {
+		return m.formResize(overlayRect)
+	}
 	// gelog.Info("overlayRect", "height", overlayRect.Height)
 
 	maxHeight := int(float32(overlayRect.Height) * 0.2)
@@ -168,8 +214,127 @@ func (m *MinibufferManagerStruct) MinibufferResize(overlayRect screen.Rect) int 
 	return height
 }
 
+// visualHeight is the number of screen rows the content of e takes when its
+// rows are wrapped at width.
+func visualHeight(e *Editorleaf, width int) int {
+	if width < 1 {
+		return 1
+	}
+	b, _, _ := e.GetBytes()
+	h := 0
+	for _, row := range bytes.Split(b, []byte{'\n'}) {
+		w := utils.WidthOnScreen(row)
+		h += max(1, (w+width-1)/width)
+	}
+	return max(h, 1)
+}
+
+// formHeights decides the height of every field from the heights they want
+// (wanted) and the rows available (avail; the header row is not included).
+// Every field gets what it wants when that fits. Otherwise the rows are shared
+// equally, and the share that a short field does not need goes to the longer
+// ones. A field that gets less than it wants scrolls.
+func formHeights(wanted []int, avail int) []int {
+	h := make([]int, len(wanted))
+	total := 0
+	for _, w := range wanted {
+		total += w
+	}
+	if total <= avail {
+		copy(h, wanted)
+		return h
+	}
+
+	// Water-filling: give every field an equal share, and hand the share a
+	// short field does not need to the others.
+	left := avail
+	remaining := len(wanted)
+	done := make([]bool, len(wanted))
+	for changed := true; changed && remaining > 0; {
+		changed = false
+		share := left / remaining
+		for i, w := range wanted {
+			if !done[i] && w <= share {
+				h[i], done[i] = w, true
+				left -= w
+				remaining--
+				changed = true
+			}
+		}
+	}
+	for i := range wanted {
+		if !done[i] {
+			h[i] = max(1, left/remaining)
+		}
+	}
+	return h
+}
+
+// formResize lays out a form session from overlayRect.Y downwards and
+// returns its height.
+func (m *MinibufferManagerStruct) formResize(overlayRect screen.Rect) int {
+	s := m.session
+
+	maxHeight := int(float32(overlayRect.Height) * 0.2)
+	if maxHeight < 5 {
+		maxHeight = 5
+	}
+
+	var visible []*Field
+	var wanted []int
+	for _, f := range s.Fields {
+		if f.Hidden {
+			continue
+		}
+		width := overlayRect.Width - f.LabelWidth
+		visible = append(visible, f)
+		wanted = append(wanted, visualHeight(f.Editor, width))
+	}
+
+	heights := formHeights(wanted, max(len(visible), maxHeight-1)) // 1 row: the header
+
+	y := overlayRect.Y + 1
+	for i, f := range visible {
+		r := screen.Rect{
+			X:      overlayRect.X + f.LabelWidth,
+			Y:      y,
+			Width:  overlayRect.Width - f.LabelWidth,
+			Height: heights[i],
+		}
+		f.Editor.Resize(r)
+		y += heights[i]
+	}
+	return y - overlayRect.Y
+}
+
+func (m *MinibufferManagerStruct) drawForm(ctx context.Context) {
+	s := m.session
+	rect := m.overlayRect
+
+	if s.Header != nil {
+		hr := rect
+		hr.Height = 1
+		screen.Get().DrawLabel(hr, &screen.LabelParams{Style: theme.ColorDefault}, s.Header())
+	}
+
+	for _, f := range s.Fields {
+		if f.Hidden {
+			continue
+		}
+		// The label is on the first row of the field.
+		lr := screen.Rect{X: rect.X, Y: f.Editor.viewArea.Y, Width: f.LabelWidth, Height: 1}
+		screen.Get().DrawLabel(lr, &screen.LabelParams{Style: theme.ColorDefault}, f.Label)
+		f.Editor.Draw(ctx)
+	}
+}
+
 func (m *MinibufferManagerStruct) Draw(ctx context.Context) bool {
 	if !m.active {
+		return false
+	}
+	if m.session.Fields != nil {
+		screen.Get().FillRect(m.overlayRect, 0, theme.ColorDefault)
+		m.drawForm(ctx)
 		return false
 	}
 
