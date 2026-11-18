@@ -33,10 +33,12 @@ type MinibufferManagerStruct struct {
 }
 
 func (m *MinibufferManagerStruct) Start(session *Session, onComplete func(result keychord.KeyDispatchTransition)) {
+	m.clearUsage() // of the session that this one replaces
 	m.session = session
 	m.onComplete = onComplete
 	m.MinibufferResize(m.overlayRect)
 	m.active = true
+	m.showUsage()
 
 	overlay.OverlayManager().Layout(screen.Get().Rect)
 }
@@ -53,7 +55,24 @@ func (m *MinibufferManagerStruct) Close() {
 	overlay.OverlayManager().Layout(screen.Get().Rect)
 }
 
+// showUsage puts the usage of the session in the echo line.
+func (m *MinibufferManagerStruct) showUsage() {
+	if m.session != nil && len(m.session.Usage) > 0 {
+		gecore.Echo.SetUsage(m.session.Usage...)
+	}
+}
+
+// clearUsage takes the usage of the session out of the echo line. A session
+// without one leaves the echo line alone: the usage of a mode that is open
+// under it stays.
+func (m *MinibufferManagerStruct) clearUsage() {
+	if m.session != nil && len(m.session.Usage) > 0 {
+		gecore.Echo.ClearUsage()
+	}
+}
+
 func (m *MinibufferManagerStruct) Cancel() {
+	m.clearUsage()
 	m.session.deactivate()
 	/* var leafEditor tree.Leaf
 	leafEditor = m.session.Editor

@@ -32,21 +32,52 @@ var CaseTypes = [...]string{
 	"Word",
 }
 
-type CaseChangeState struct {
-	Start int
-	End   int
-	Text  string
-	Case  Case
-}
-
+// splitCaseWords splits s into its words: at every character that is not an
+// ASCII letter or digit, and inside a piece at the places where a camel-case
+// word starts ("fooBar" -> foo, Bar; "HTTPServer" -> HTTP, Server). A digit
+// belongs to the word before it ("foo2Bar" -> foo2, Bar).
 func splitCaseWords(s string) []string {
-	// Keep the behavior of the original extension:
-	// ASCII letters and numbers are treated as word components.
-	return strings.FieldsFunc(s, func(r rune) bool {
+	var words []string
+
+	for _, piece := range strings.FieldsFunc(s, func(r rune) bool {
 		return !(r >= 'a' && r <= 'z') &&
 			!(r >= 'A' && r <= 'Z') &&
 			!(r >= '0' && r <= '9')
-	})
+	}) {
+		words = append(words, splitCamel(piece)...)
+	}
+
+	return words
+}
+
+// splitCamel splits one piece that has only ASCII letters and digits at the
+// places where a camel-case word starts.
+func splitCamel(piece string) []string {
+	isUp := func(c byte) bool { return c >= 'A' && c <= 'Z' }
+	isLow := func(c byte) bool { return c >= 'a' && c <= 'z' }
+	isDig := func(c byte) bool { return c >= '0' && c <= '9' }
+
+	var words []string
+
+	start := 0
+
+	for i := 1; i < len(piece); i++ {
+		prev, cur := piece[i-1], piece[i]
+
+		switch {
+		// fooBar, foo2Bar
+		case isUp(cur) && (isLow(prev) || isDig(prev)):
+			words = append(words, piece[start:i])
+			start = i
+
+		// HTTPServer: the last capital of a run starts the next word
+		case isUp(cur) && isUp(prev) && i+1 < len(piece) && isLow(piece[i+1]):
+			words = append(words, piece[start:i])
+			start = i
+		}
+	}
+
+	return append(words, piece[start:])
 }
 
 func formatCase(words []string, typ string) string {
@@ -345,91 +376,191 @@ func isLowerWord(s string) bool {
 
 /////
 
-/*
-// ChangeCase changes word to the next case.
-// If word does not have a recognized case, snake_case is returned.
-func ChangeCase(word string) string {
-	words := splitCaseWords(word)
+// identifierCases are the cases that keep one token (no spaces). They are the
+// cycle of ChangeCase for a text that has no space.
+var identifierCases = []Case{
+	CaseSnake, CaseScreamingSnake, CaseKebab, CaseTrain, CaseLowerCamel, CaseUpperCamel,
+}
+
+// phraseCases are all the cases. They are the cycle for a text that has a
+// space (a phrase).
+var phraseCases = []Case{
+	CaseSnake, CaseScreamingSnake, CaseKebab, CaseTrain, CaseLowerCamel, CaseUpperCamel,
+	CaseLower, CaseUpper, CaseWord,
+}
+
+// caseIndexOf returns the Case that has the name, or -1 ("unknown").
+func caseIndexOf(name string) int {
+	for i, n := range CaseTypes {
+		if n == name {
+			return i
+		}
+	}
+
+	return -1
+}
+
+const caseAffixChars = "_- "
+
+// splitCaseAffixes cuts the '_', '-' and ' ' at both ends off text, which
+// would be lost by the conversion ("_privateName" stays "_private_name").
+// core is empty when text has nothing else.
+func splitCaseAffixes(text string) (prefix, core, suffix string) {
+	core = strings.Trim(text, caseAffixChars)
+	if core == "" {
+		return "", "", ""
+	}
+
+	prefix = text[:len(text)-len(strings.TrimLeft(text, caseAffixChars))]
+	suffix = text[len(strings.TrimRight(text, caseAffixChars)):]
+
+	return prefix, core, suffix
+}
+
+// isCaseConvertible reports whether every character of core is one that the
+// conversion keeps: ASCII letters, digits, '_', '-' and ' '. Anything else
+// (other scripts, tabs, line breaks) would be lost when the words are joined
+// again, so such a text is left alone.
+func isCaseConvertible(core string) bool {
+	for i := 0; i < len(core); i++ {
+		c := core[i]
+		if !isCaseWordChar(c) && c != ' ' {
+			return false
+		}
+	}
+
+	return true
+}
+
+// guessCurrentCase returns the Case that text seems to be in, or -1.
+func guessCurrentCase(text string) int {
+	_, core, _ := splitCaseAffixes(text)
+
+	return caseIndexOf(guessCase(core))
+}
+
+// caseCandidate is one step of the cycle: a case and the text it gives.
+type caseCandidate struct {
+	c    Case
+	text string
+}
+
+// caseCandidates returns the cycle of the words, in order, with every
+// distinct text once (the first case that gives it). One word "foo" gives
+// snake_case, kebab-case and lowerCamelCase the same text; without this the
+// cycle would go foo, FOO, foo, Foo, foo, Foo, ...
+func caseCandidates(prefix string, words []string, suffix string, cycle []Case) []caseCandidate {
+	out := make([]caseCandidate, 0, len(cycle))
+	seen := make(map[string]bool, len(cycle))
+
+	for _, c := range cycle {
+		t := prefix + formatCase(words, CaseTypes[c]) + suffix
+		if seen[t] {
+			continue
+		}
+
+		seen[t] = true
+
+		out = append(out, caseCandidate{c: c, text: t})
+	}
+
+	return out
+}
+
+// nextCaseText converts text to the case after cur and returns the new text
+// and that case.
+//
+// cur is the case text is known to be in (-1 if unknown). It is kept by the
+// caller and handed back, because guessing it from the text is ambiguous: "foo"
+// is lowercase, snake_case, kebab-case and lowerCamelCase at once. When cur
+// is not a step of the cycle (unknown, or from the cycle of another kind of
+// text), the step whose text is the text itself is taken as the place.
+//
+// A step that gives the text itself is skipped, and at most one turn of the
+// cycle is made, so there is no endless loop: ok is false when no step gives
+// another text (or text cannot be converted), and nothing should be changed.
+func nextCaseText(text string, cur int) (out string, next int, ok bool) {
+	prefix, core, suffix := splitCaseAffixes(text)
+	if core == "" || !isCaseConvertible(core) {
+		return "", cur, false
+	}
+
+	words := splitCaseWords(core)
 	if len(words) == 0 {
-		return word
+		return "", cur, false
 	}
 
-	current := guessCase(word)
-	next := nextCaseType(current)
+	cycle := identifierCases
+	if strings.Contains(core, " ") {
+		cycle = phraseCases
+	}
 
-	return formatCase(words, next)
+	steps := caseCandidates(prefix, words, suffix, cycle)
+
+	pos := -1
+
+	for i, st := range steps {
+		if int(st.c) == cur {
+			pos = i
+			break
+		}
+	}
+
+	if pos < 0 {
+		for i, st := range steps {
+			if st.text == text {
+				pos = i
+				break
+			}
+		}
+	}
+
+	// pos is -1 when the text is in no step: start at the first one.
+	for k := 1; k <= len(steps); k++ {
+		st := steps[(pos+k)%len(steps)]
+		if st.text != text {
+			return st.text, int(st.c), true
+		}
+	}
+
+	return "", cur, false
 }
-*/
 
-////////////
+// ---- the word around the cursor ----
 
-// ChangeCase changes the word under the cursor to the next case.
-/*
-func (e *Editorleaf) ChangeCase() {
-	start, end, ok := e.RowsPos()
-	if !ok {
-		return
-	}
-
-	text := e.TextRange(start, end)
-	if text == "" {
-		return
-	}
-
-	var next Case
-
-	if e.caseChange.Start == start &&
-		e.caseChange.End == end &&
-		e.caseChange.Text == text {
-
-		next = NextCase(e.caseChange.Case)
-
-	} else {
-		current := GuessCase(text)
-		next = NextCase(current)
-	}
-
-	replaced := FormatCase(SplitCaseWords(text), next)
-	if replaced == text {
-		return
-	}
-
-	e.Replace(start, end, replaced)
-
-	e.caseChange = CaseChangeState{
-		Start: start,
-		End:   end,
-		Text:  replaced,
-		Case:  next,
-	}
-}
-*/
-
-/*
-// GuessTargetWord finds the word around the specified column.
+// GuessTargetWord finds the word around the byte column character of row
+// line.
 //
 // A target consists of ASCII letters, digits, '_' and '-'.
 // '-' at the beginning or end is excluded from the target.
-// The first and last characters of the resulting word must be ASCII letters.
+// The first character of the resulting word must be an ASCII letter and the
+// last one an ASCII letter or digit.
 // A word must contain at least two characters.
+//
+// start and end are byte columns, end exclusive.
 func (e *Editorleaf) GuessTargetWord(line, character int) (start, end int, word string, ok bool) {
-	row := e.editBuffer.Rows.Row(line)
-	text := row.String()
+	row := e.editBuffer.Rows().Row(line)
+	if row == nil {
+		return 0, 0, "", false
+	}
 
+	return guessTargetWord(row.Bytes(), character)
+}
+
+// guessTargetWord is GuessTargetWord on the bytes of one row.
+func guessTargetWord(text []byte, character int) (start, end int, word string, ok bool) {
 	if character < 0 || character > len(text) {
 		return 0, 0, "", false
 	}
 
 	// Find start position.
 	start = character
-
 	for start > 0 && isCaseWordChar(text[start-1]) {
 		start--
 	}
 
 	// Find end position.
 	end = character
-
 	for end < len(text) && isCaseWordChar(text[end]) {
 		end++
 	}
@@ -438,36 +569,30 @@ func (e *Editorleaf) GuessTargetWord(line, character int) (start, end int, word 
 		return 0, 0, "", false
 	}
 
-	word = text[start:end]
-
-	// '-' at the beginning.
-	for len(word) > 0 && word[0] == '-' {
-		word = word[1:]
+	// '-' at the beginning and at the end.
+	for start < end && text[start] == '-' {
 		start++
 	}
 
-	// '-' at the end.
-	for len(word) > 0 && word[len(word)-1] == '-' {
-		word = word[:len(word)-1]
+	for end > start && text[end-1] == '-' {
 		end--
 	}
 
-	if len(word) < 2 {
+	if end-start < 2 {
 		return 0, 0, "", false
 	}
 
 	// First character must be an ASCII letter.
-	if !isCaseLetter(word[0]) {
+	if !isCaseLetter(text[start]) {
 		return 0, 0, "", false
 	}
 
 	// Last character must be an ASCII letter or digit.
-	if !isCaseLetter(word[len(word)-1]) &&
-		!isCaseDigit(word[len(word)-1]) {
+	if last := text[end-1]; !isCaseLetter(last) && !isCaseDigit(last) {
 		return 0, 0, "", false
 	}
 
-	return start, end, word, true
+	return start, end, string(text[start:end]), true
 }
 
 func isCaseWordChar(c byte) bool {
@@ -485,4 +610,3 @@ func isCaseLetter(c byte) bool {
 func isCaseDigit(c byte) bool {
 	return c >= '0' && c <= '9'
 }
-*/

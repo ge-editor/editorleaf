@@ -37,7 +37,8 @@ func (e *Editorleaf) workspaceSymbolCommand() *Command {
 		// CommandAliases:     []string{"symbol", "lsp-workspace-symbol"},
 		CommandDescription: "List the symbols of the workspace that match a query (lsp-workspace-symbol QUERY)",
 		Run: func(ctx context.Context, args []string) (bool, error) {
-			e.workspaceSymbols(strings.Join(args, " "))
+			// ESC x passes the raw input, command name included.
+			e.workspaceSymbols(commandText(args, "lsp-workspace-symbol"))
 			return true, nil
 		},
 	}

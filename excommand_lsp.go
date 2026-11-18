@@ -42,7 +42,7 @@ func (e *Editorleaf) definitionCommand() *Command {
 		// CommandAliases:     []string{"goto-definition", "lsp-definition"},
 		CommandDescription: "Jump to the definition of the symbol at the cursor",
 		Run: func(ctx context.Context, args []string) (bool, error) {
-			e.definition()
+			e.LspGotoDefinition()
 			return true, nil
 		},
 	}
@@ -75,7 +75,7 @@ func (e *Editorleaf) hover() {
 	})
 }
 
-func (e *Editorleaf) definition() {
+func (e *Editorleaf) LspGotoDefinition() {
 	if languageService == nil {
 		gecore.Echo.AddText("No language service")
 		return

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/ge-editor/editorleaf/charset"
 	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/gecore"
 	"github.com/ge-editor/theme"
@@ -77,12 +78,21 @@ func (e *Editorleaf) renameUndoCommand() *Command {
 	}
 }
 
+// renameNewName returns the new name that was typed after the command name.
+// ESC x passes the raw input ("lsp-rename-symbol NewName") as one element,
+// command name included, like it does for every command; taking that whole
+// string as the name sent "lsp-rename-symbol NewName" to the language server.
+// Other callers may pass the name alone; both forms are accepted.
+func renameNewName(args []string) string {
+	return commandText(args, "lsp-rename-symbol")
+}
+
 func (e *Editorleaf) rename(args []string) {
-	if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
-		gecore.Echo.AddText("Usage: lsp-rename-symbol NEWNAME")
+	newName := renameNewName(args)
+	if newName == "" || strings.ContainsAny(newName, " \t") {
+		gecore.Echo.AddText("Usage: lsp-rename-symbol NEWNAME (one word)")
 		return
 	}
-	newName := strings.TrimSpace(args[0])
 
 	switch {
 	case languageService == nil:
@@ -218,11 +228,13 @@ func (e *Editorleaf) planRename(we *WorkspaceEdit) (*renamePlan, error) {
 				return nil, fmt.Errorf("%s changed since the rename was computed", name)
 			}
 
-			data, err := os.ReadFile(fe.Path)
+			// Read like the buffer does (encoding, NFC), or the rows differ
+			// from the buffer for any file that is not UTF-8.
+			file, err := charset.ReadFile(fe.Path)
 			switch {
 			case err != nil:
 				plan.warnings = append(plan.warnings, name+": the file is not on disk")
-			case !sameRows(splitLines(data), f.rows):
+			case !sameRows(splitLines(file.Text), f.rows):
 				if !fe.Open {
 					// The server read the file from disk, but the buffer has
 					// other content: its positions do not fit the buffer.
@@ -242,11 +254,11 @@ func (e *Editorleaf) planRename(we *WorkspaceEdit) (*renamePlan, error) {
 			}
 			unopened = append(unopened, info)
 
-			data, err := os.ReadFile(fe.Path)
+			file, err := charset.ReadFile(fe.Path)
 			if err != nil {
 				return nil, fmt.Errorf("cannot read %s: %w", name, err)
 			}
-			f.rows = splitLines(data)
+			f.rows = splitLines(file.Text)
 			plan.warnings = append(plan.warnings, name+": will be loaded as a buffer (not saved)")
 		}
 

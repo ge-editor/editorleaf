@@ -47,7 +47,16 @@ func (c *Command) Execute(ctx context.Context, args []string) (bool, error) {
 func (e *Editorleaf) Commands() []excommand.ExCommand {
 	cmds := []excommand.ExCommand{
 		e.languageCommand(),
+		e.encodingCommand(),
+		e.reloadEncodingCommand(),
+		e.newlineCommand(),
 		e.reloadFileCommand(),
+
+		e.spellCommand(),
+		e.spellCorrectCommand(),
+		e.spellAddCommand(),
+		e.spellIgnoreCommand(),
+		e.spellIdentifiersCommand(),
 
 		e.hoverCommand(),
 		e.definitionCommand(),

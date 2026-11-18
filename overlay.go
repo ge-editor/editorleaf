@@ -157,8 +157,10 @@ func sameMarkSpans(hl *highlight.Highlights, order []editbuffer.RowsPos, isLast 
 // top) and hangingIndentWidth the indent of its wrapped logical rows.
 //
 // Painting afterwards, from the cache, keeps this independent of the many
-// places that draw a cell (wrapping, control codes, ...), and a mark wins
-// over trailing whitespace.
+// places that draw a cell (wrapping, control codes, ...). The order of the
+// paints is the priority (the last one wins): trailing whitespace, misspelled
+// words, marks, multicursor cursors. It is not the order of the highlight
+// layers: see the comment of highlight.LayerMark.
 func (e *Editorleaf) paintRowOverlays(rowIndex, startScreenY int, cache []locale.Cell, hangingIndentWidth int) {
 	if e.mode != ModeEditor || len(cache) == 0 {
 		return
@@ -180,10 +182,17 @@ func (e *Editorleaf) paintRowOverlays(rowIndex, startScreenY int, cache []locale
 		}
 	}
 
-	// Marks, then the cursors of the multicursor mode on top of them
+	// Misspelled words, then the marks on top of them, then the cursors of the
+	// multicursor mode on top of those.
+	//
+	// Every paint here starts from the cached style of the cell, not from what
+	// is on the screen, so the last one that paints a cell is the one that
+	// shows: a mark on a misspelled word hides its underline, and not the
+	// other way round.
 	if e.meta == nil || e.meta.HighlightLayer == nil {
 		return
 	}
+	e.paintMisspelled(rowIndex, startScreenY, cache, hangingIndentWidth)
 	if hl := e.meta.HighlightLayer.Peek(highlight.LayerMark); hl != nil {
 		for i, n := 0, hl.SpansLength(); i < n; i++ {
 			sp := hl.GetSpan(i)
@@ -265,4 +274,45 @@ func (e *Editorleaf) paintCell(startScreenY, hangingIndentWidth int, cell locale
 		return
 	}
 	e.setCellInEditArea(x, y, style, cell.Ch, cell.Width)
+}
+
+// ---------------------------------------------------------------------------
+// Misspelled words
+// ---------------------------------------------------------------------------
+
+// spellUnderlineColor is the color of the underline of a misspelled word.
+var spellUnderlineColor = tcell.NewRGBColor(255, 90, 90)
+
+// underlined returns style with an underline. The colors stay, so the syntax
+// color of a comment is still there, and a search result keeps its background.
+func underlined(style tcell.Style) tcell.Style {
+	return style.Underline(true, spellUnderlineColor)
+}
+
+// paintMisspelled underlines the misspelled words (highlight.LayerSpell) on
+// the row. Their ranges are dropped as soon as the row is edited (see
+// spell.entry.onChange), so a range is only seen on the text it was found in.
+func (e *Editorleaf) paintMisspelled(rowIndex, startScreenY int, cache []locale.Cell, hangingIndentWidth int) {
+	hl := e.meta.HighlightLayer.Peek(highlight.LayerSpell)
+	if hl == nil {
+		return
+	}
+	n := hl.SpansLength()
+	// The spans are in ascending order: find the first one on the row.
+	i := sort.Search(n, func(i int) bool { return hl.GetSpan(i).Start.RowIndex >= rowIndex })
+	for ; i < n; i++ {
+		sp := hl.GetSpan(i)
+		if sp.Start.RowIndex != rowIndex {
+			break
+		}
+		for p := max(sp.Start.ColIndex, 0); p < sp.End.ColIndex && p < len(cache)-1; {
+			cell := cache[p]
+			if cell.Size == 0 {
+				p++ // a continuation byte
+				continue
+			}
+			e.paintCell(startScreenY, hangingIndentWidth, cell, underlined(cell.Style))
+			p += cell.Size
+		}
+	}
 }

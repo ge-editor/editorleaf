@@ -1,9 +1,10 @@
 package editbuffer
 
 import (
-	"io/fs"
 	"os"
 	"time"
+
+	"github.com/ge-editor/editorleaf/charset"
 )
 
 // What the file looked like on disk when the buffer was last read from it or
@@ -100,26 +101,11 @@ func (eb *EditBuffer) Reload() error {
 	// ChangedOnDisk instead of being lost.
 	mt, size, ok := statRegular(eb.path)
 
-	fp, err := os.Open(eb.path)
+	raw, err := os.ReadFile(eb.path)
 	if err != nil {
 		return err
 	}
-	defer fp.Close()
-
-	fresh := &EditBuffer{}
-	if err := fresh.LoadFrom(fp); err != nil {
-		return err
-	}
-
-	eb.NewlineType = fresh.NewlineType
-	eb.SetBytesArray(fresh.rows.BytesArray())
-	eb.UndoAction.Clear()
-	eb.setDisk(mt, size, ok)
-
-	if info, err := fp.Stat(); err == nil {
-		eb.SetReadonly(info.Mode().Perm()&fs.FileMode(0200) == 0)
-	}
-	return nil
+	return eb.replaceWith(charset.Open(raw), mt, size, ok)
 }
 
 // DiskDiffers reports whether the file on disk is not the one the buffer was

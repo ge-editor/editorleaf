@@ -15,14 +15,26 @@ bracket matching
 spell check
 */
 
+// The layers are of two kinds, and only one of them is ordered by this list.
+//
+//   - LayerSyntax to LayerSelection are text styles. FindHighlightSpan returns
+//     the span of the highest layer that covers a position (one span; styles
+//     are not merged), so for them the order of the constants is the priority.
+//   - LayerCursor, LayerMark and LayerSpell are not text styles: they are
+//     painted over the drawn cells (paintRowOverlays) and FindHighlightSpan
+//     skips them. Their place in this list only gives each one its slot (see
+//     NewHighlightsLayer). What is on top of what is the order of the paints in
+//     paintRowOverlays, where the last paint wins: misspelled words, marks,
+//     cursors.
 const (
-	LayerSyntax    = iota // buffer
-	LayerSemantic         // buffer
-	LayerDiagnostic       // buffer, LSP diagnostics (above syntax, below search)
-	LayerSearch           // meta
-	LayerSelection        // meta
-	LayerCursor           // meta, multi cursor
-	LayerMark             // meta, marks of the file. Painted over the syntax color by the editor; FindHighlightSpan skips it
+	LayerSyntax     = iota // buffer
+	LayerSemantic          // buffer
+	LayerDiagnostic        // buffer, LSP diagnostics (above syntax, below search)
+	LayerSearch            // meta
+	LayerSelection         // meta
+	LayerCursor            // meta, multi cursor
+	LayerMark              // meta, marks of the file. Painted over the syntax color by the editor; FindHighlightSpan skips it
+	LayerSpell             // buffer, misspelled words. An underline painted over the cells (paintRowOverlays), like the marks; FindHighlightSpan skips it
 )
 
 type Span struct {

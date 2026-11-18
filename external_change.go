@@ -97,17 +97,10 @@ func (e *Editorleaf) ReloadFile() {
 		return
 	}
 
-	tree.ForEachLeafAll(func(l tree.Leaf) bool {
-		ed, ok := l.(*Editorleaf)
-		if !ok || ed.editBuffer != eb || ed.meta == nil {
-			return true
-		}
-		ed.bsArray.ClearAll()
-		ed.meta.ClampRowsPos(eb)
-		return true
-	})
+	refreshLeaves(eb)
 
 	gecore.Echo.AddText("Reloaded " + path).WithStyle(theme.ColorEchoGreen)
+	echoLoadWarnings(eb)
 }
 
 // reloadFileCommand is the ESC x "reload-file" command: reload the file of

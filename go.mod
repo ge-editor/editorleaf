@@ -11,6 +11,7 @@ require (
 	github.com/ge-editor/locale v0.1.16
 	github.com/ge-editor/theme v0.1.20
 	github.com/ge-editor/utils v0.1.20
+	golang.org/x/text v0.43.0
 )
 
 require (
@@ -21,5 +22,4 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/term v0.47.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
 )

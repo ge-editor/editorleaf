@@ -8,6 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/ge-editor/editorleaf/charset"
 	"github.com/ge-editor/editorleaf/mark"
 )
 
@@ -115,8 +116,8 @@ func (c *MarkTextCache) diskLine(mk *mark.Mark) (line []byte, found bool) {
 				clear(c.files)
 			}
 			f = &markFile{gen: c.gen, modTime: info.ModTime(), size: info.Size()}
-			if b, err := os.ReadFile(mk.FilePath); err == nil {
-				f.lines = bytes.Split(b, []byte{'\n'})
+			if file, err := charset.ReadFile(mk.FilePath); err == nil {
+				f.lines = bytes.Split(file.Text, []byte{'\n'})
 				f.ok = true
 			}
 			c.files[mk.FilePath] = f

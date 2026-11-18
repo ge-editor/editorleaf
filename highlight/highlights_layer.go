@@ -9,7 +9,7 @@ type HighlightsLayer []*Highlights
 // running, so the draw goroutine can read the layer while the event loop
 // replaces the spans of a slot.
 func NewHighlightsLayer() *HighlightsLayer {
-	h := make(HighlightsLayer, LayerMark+1)
+	h := make(HighlightsLayer, LayerSpell+1)
 	for i := range h {
 		h[i] = NewHighlights()
 	}

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ge-editor/editorleaf/charset"
 	"github.com/ge-editor/gecore/lang"
 	"github.com/ge-editor/utils"
 )
@@ -37,9 +38,17 @@ type EditBuffer struct {
 
 	langMode *lang.Mode
 
-	rows     *Rows_
-	encoding string
+	rows *Rows_
 	NewlineType
+
+	// The file as it is on disk (see fileconv.go): the rows are UTF-8, the
+	// codec says how to write them back.
+	codec      fileCodec
+	loadResult Result
+	// metaDirty: the encoding or the newline was changed. That is not an
+	// edit, so the undo stack does not know it; the buffer is modified
+	// anyway until it is saved.
+	metaDirty bool
 
 	flags // readonly
 
@@ -67,7 +76,6 @@ func NewFile(rawPath string) *EditBuffer {
 		langMode: langMode,
 
 		rows:        nil,
-		encoding:    "UTF-8",
 		NewlineType: NewlineTypeLF,
 
 		flags: 0,
@@ -145,24 +153,34 @@ func (eb *EditBuffer) Load() error {
 	// Stat before reading, so a change during the read is not lost.
 	mt, size, ok := statRegular(eb.path)
 
-	fp, err := os.Open(eb.path)
+	raw, err := os.ReadFile(eb.path)
 	if err != nil {
 		return err
 	}
-	defer fp.Close()
-
-	if err := eb.LoadFrom(fp); err != nil {
+	if err := eb.loadFile(charset.Open(raw)); err != nil {
 		return err
 	}
 	eb.setDisk(mt, size, ok)
 	return nil
 }
 
-// LoadFrom replaces the content with everything read from r and detects the
-// newline type, exactly like Load does for the file.
+// LoadFrom replaces the content with everything read from r, converted like
+// Load does for the file: the encoding is found out and converted to UTF-8,
+// and the newline type is detected.
 func (eb *EditBuffer) LoadFrom(r io.Reader) error {
+	raw, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	return eb.loadFile(charset.Open(raw))
+}
+
+// loadText replaces the content with the UTF-8 text read from r and detects
+// the newline type.
+func (eb *EditBuffer) loadText(r io.Reader) error {
 	reader := bufio.NewReader(r)
 
+	eb.loadResult = ResultNone
 	eb.rows = NewRowsType()
 	var countLF, countCRLF, countCR int
 	var finalRowNewlineType NewlineType
@@ -205,6 +223,16 @@ func (eb *EditBuffer) LoadFrom(r io.Reader) error {
 			eb.Rows().Row(linesIndex).Add([]byte{define.EOF})
 		}
 	} */
+
+	kinds := 0
+	for _, c := range []int{countLF, countCRLF, countCR} {
+		if c > 0 {
+			kinds++
+		}
+	}
+	if kinds > 1 {
+		eb.loadResult |= ResultMixedNewline // unified to the most used one
+	}
 
 	// Set newline type
 	eb.NewlineType = []NewlineType{NewlineTypeLF, NewlineTypeCRLF, NewlineTypeCR}[utils.MaxValueIndex([]int{countLF, countCRLF, countCR})]
@@ -291,6 +319,10 @@ func (eb *EditBuffer) Bytes() ([]byte, []int, error) {
 func (eb *EditBuffer) Save() (Result, error) {
 	result := ResultNone
 
+	if eb.codec.lossy {
+		return result, ErrLossy
+	}
+
 	if (*eb.langMode).IsFormattingBeforeSave() {
 		sourceBytes, _, err := eb.Bytes()
 		if err != nil {
@@ -309,7 +341,14 @@ func (eb *EditBuffer) Save() (Result, error) {
 		}
 	}
 
-	sourceBytes, _, err := utils.JoinRows(eb.rows.BytesArray(), eb.GetNewLine().Bytes(), true)
+	// The rows are UTF-8 and joined with LF; the file gets its own newline
+	// and encoding back. The conversion is done before the file is touched,
+	// so a character that the encoding cannot hold leaves the file as it is.
+	text, _, err := eb.Bytes()
+	if err != nil {
+		return result, err
+	}
+	sourceBytes, err := charset.Encode(text, eb.codec.spec, eb.codec.macNFD, eb.NewlineType.Bytes())
 	if err != nil {
 		return result, err
 	}
@@ -319,6 +358,7 @@ func (eb *EditBuffer) Save() (Result, error) {
 		return result, err
 	}
 
+	eb.metaDirty = false
 	eb.recordDisk() // our own write is not an external change
 	eb.emitSaved()
 	return result | ResultSaved, nil
@@ -378,10 +418,6 @@ func (eb *EditBuffer) GetDispPath() string {
 	return eb.ext
 } */
 
-func (eb *EditBuffer) GetEncoding() string {
-	return eb.encoding
-}
-
 func (eb *EditBuffer) GetNewLine() NewlineType {
 	return eb.NewlineType
 }
@@ -400,10 +436,12 @@ func (eb *EditBuffer) SetReadonly(b bool) {
 	}
 }
 
+// IsReadonly reports whether the buffer is read-only: the file is, or it
+// cannot be written back without loss (see IsLossy).
 func (eb *EditBuffer) IsReadonly() bool {
-	return eb.flags&READONLY != 0
+	return eb.flags&READONLY != 0 || eb.codec.lossy
 }
 
 func (eb *EditBuffer) IsDirtyFlag() bool {
-	return eb.UndoAction.IsDirty()
+	return eb.UndoAction.IsDirty() || eb.metaDirty
 }

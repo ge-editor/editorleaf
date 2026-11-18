@@ -9,6 +9,7 @@ import (
 	"github.com/ge-editor/editorleaf/diagnostic"
 	"github.com/ge-editor/editorleaf/editbuffer"
 	"github.com/ge-editor/editorleaf/highlight"
+	"github.com/ge-editor/editorleaf/spell"
 	"github.com/ge-editor/editorleaf/syntax"
 	"github.com/ge-editor/gecore/screen"
 )
@@ -39,6 +40,17 @@ func (e *Editorleaf) InitTreesitter() {
 		e.meta.HighlightLayer,
 		highlight.LayerDiagnostic,
 	)
+
+	// The misspelled words of the buffer, if the spell check is on for it.
+	e.spellUnsubscribe = spell.Subscribe(
+		e.editBuffer,
+		e.meta.HighlightLayer,
+		highlight.LayerSpell,
+	)
+
+	// A buffer starts with the spell check on if OnByDefault says so (the
+	// first time only; see spell.TakeStart).
+	e.autoSpell()
 
 	// The search results follow the edits of the buffer.
 	e.searchUnsubscribe = e.editBuffer.AddChangeListener(e.onBufferChangeForSearch)
@@ -77,6 +89,10 @@ func (e *Editorleaf) WillCloseTreesitter() {
 	if e.diagnosticUnsubscribe != nil {
 		e.diagnosticUnsubscribe()
 		e.diagnosticUnsubscribe = nil
+	}
+	if e.spellUnsubscribe != nil {
+		e.spellUnsubscribe()
+		e.spellUnsubscribe = nil
 	}
 	if e.searchUnsubscribe != nil {
 		e.searchUnsubscribe()

@@ -10,6 +10,7 @@ import (
 
 	"github.com/ge-editor/editorleaf/diagnostic"
 	"github.com/ge-editor/editorleaf/editbuffer"
+	"github.com/ge-editor/editorleaf/spell"
 	"github.com/ge-editor/editorleaf/syntax"
 	"github.com/ge-editor/gecore/screen"
 	"github.com/ge-editor/gecore/state"
@@ -313,6 +314,7 @@ func (bss *BufferSets) RemoveByBufferFile(ff *editbuffer.EditBuffer) int {
 	// stop its syntax Worker (parser + tree).
 	notifyRemove(ff)
 	diagnostic.Release(ff)
+	spell.Release(ff)
 	syntax.Release(ff)
 	*bss = slices.Delete(*bss, i, i+1)
 	return i

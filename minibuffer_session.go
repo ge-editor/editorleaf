@@ -31,6 +31,12 @@ type Session struct {
 	// Header returns the text of the header line, for example the check
 	// boxes of a search. It is called at every draw.
 	Header func() string
+
+	// Usage is what the echo line shows while the session is open: its name
+	// and its keys (see gecore.Echo.SetUsage). The minibuffer manager sets
+	// it when the session starts and clears it when the session ends, however
+	// it ends (Enter, C-g, another session). nil shows nothing.
+	Usage []string
 }
 
 // Field is one input of a form session.

@@ -113,6 +113,11 @@ type Editorleaf struct {
 	// cleared together with syntaxUnsubscribe.
 	diagnosticUnsubscribe func()
 
+	// spellUnsubscribe removes this editor's HighlightLayer from the
+	// misspelled words of its buffer (package spell). Subscribed and cleared
+	// together with syntaxUnsubscribe.
+	spellUnsubscribe func()
+
 	// searchUnsubscribe removes the listener that makes the search results
 	// follow the edits of the buffer. Subscribed and cleared together with
 	// syntaxUnsubscribe.
@@ -138,6 +143,9 @@ type Editorleaf struct {
 	// multiHideCursor is non-zero while the real cursor is hidden. It is
 	// read by the draw goroutine, so it is accessed with sync/atomic.
 	multiHideCursor int32
+
+	// caseSel is the case-select mode of this editor (see case_select.go).
+	caseSel caseSelection
 
 	locale locale.Locale // Locale interface
 
@@ -1094,6 +1102,32 @@ func (e *Editorleaf) isColumnOver(x, y int, chWidth int) bool {
 	return false
 }
 
+// columnOverStyle returns the style of the cell at (x, y) of the edit area
+// (relative coordinates, like isColumnOver): beyond the recommended column
+// width a cell whose background is the default one gets
+// theme.ColorColumnLimitOverflowBackground. A cell with a background of its
+// own (search results, marks, ...) is kept, or it would not be seen there.
+//
+// "has background c" is tested by setting c and comparing: tcell.Style is
+// comparable, and setting the color it already has changes nothing (see
+// cursorLineStyle).
+func (e *Editorleaf) columnOverStyle(x, y, chWidth int, style tcell.Style) tcell.Style {
+	if !e.isColumnOver(x, y, chWidth) {
+		return style
+	}
+	return overflowBackground(style)
+}
+
+// overflowBackground gives a style with the default background the one of the
+// area beyond the recommended column width; any other style is returned as it
+// is.
+func overflowBackground(style tcell.Style) tcell.Style {
+	if style.Background(theme.ColorDefaultBackground) == style {
+		return style.Background(theme.ColorColumnLimitOverflowBackground)
+	}
+	return style
+}
+
 // compute boundary of rowIndex
 // draw one row
 //   - n: y position within the Leaf to draw the row
@@ -1205,7 +1239,6 @@ func (e *Editorleaf) drawLineWithCompute(
 		currentCell.Class = e.locale.GetCharClass(currentCell.Ch)
 
 		// Highlight Style
-		isNoSpanStyle := true
 		// Special char width
 		if /* currentCell.Ch == define.EOF && */ isLastCh && lines.isFinalRow {
 			currentCell.Class = locale.EOF
@@ -1233,7 +1266,6 @@ func (e *Editorleaf) drawLineWithCompute(
 				} else {
 					currentCell.Style = span.Color
 				}
-				isNoSpanStyle = false
 			}
 		}
 
@@ -1260,9 +1292,7 @@ func (e *Editorleaf) drawLineWithCompute(
 					currentCell.Ch, currentCell.Style, currentCell.Size, currentCell.Width, currentCell.Class,
 					sy-startScreenY, sx, hangingIndentWidth)
 				if isDraw {
-					if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
-						currentCell.Style = currentCell.Style.Background(theme.ColorColumnLimitOverflowBackground)
-					}
+					currentCell.Style = e.columnOverStyle(sx, sy, currentCell.Width, currentCell.Style)
 					e.setCellInEditArea(sx, sy, currentCell.Style, currentCell.Ch, currentCell.Width)
 					/*
 						e.fillInEditArea(screen.Rect{ // 実行されていない、もしくは意味ない？
@@ -1287,9 +1317,7 @@ func (e *Editorleaf) drawLineWithCompute(
 					startLogicalRowByteIndex = bytePosOfRow - prevCell.Size // 次の論理行開始位置 byte index
 					if isDraw {
 						s := theme.ColorMarkContinue
-						if isNoSpanStyle && e.isColumnOver(sx-prevCell.Width, sy, currentCell.Width) {
-							s = s.Background(theme.ColorColumnLimitOverflowBackground)
-						}
+						s = e.columnOverStyle(sx-prevCell.Width, sy, currentCell.Width, s)
 						e.setCellInEditArea(sx-prevCell.Width, sy, s, theme.MarkContinue, 1)
 						e.fillInEditArea(screen.Rect{
 							X:      sx - prevCell.Width + 1,
@@ -1308,9 +1336,7 @@ func (e *Editorleaf) drawLineWithCompute(
 							prevCell.Ch, s, 1, 1, prevCell.Class,
 							sy-startScreenY, sx, hangingIndentWidth)
 						if isDraw {
-							if isNoSpanStyle && e.isColumnOver(sx, sy, prevCell.Width) {
-								s = s.Background(theme.ColorColumnLimitOverflowBackground)
-							}
+							s = e.columnOverStyle(sx, sy, prevCell.Width, s)
 							e.setCellInEditArea(sx, sy, s, '^', 1)              // ★
 							e.setCellInEditArea(sx+1, sy, s, prevCell.Ch+64, 1) // ★
 						}
@@ -1319,8 +1345,9 @@ func (e *Editorleaf) drawLineWithCompute(
 						// 折り返した後の情報で再設定
 						// Color column limit overflow background
 						s := prevCell.Style
-						if s == theme.ColorDefault.Background(theme.ColorColumnLimitOverflowBackground) {
-							s = theme.ColorDefault
+						// (any style that got it: syntax colors have it too now)
+						if s.Background(theme.ColorColumnLimitOverflowBackground) == s {
+							s = s.Background(theme.ColorDefaultBackground)
 						}
 						cacheCellInfo(&runeWidth, bytePosOfRow-prevCell.Size,
 							prevCell.Ch, s, prevCell.Size, prevCell.Width, prevCell.Class,
@@ -1342,9 +1369,7 @@ func (e *Editorleaf) drawLineWithCompute(
 							currentCell.Ch, s, 1, 1, currentCell.Class,
 							sy-startScreenY, sx, hangingIndentWidth)
 						if isDraw {
-							if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
-								s = s.Background(theme.ColorColumnLimitOverflowBackground)
-							}
+							s = e.columnOverStyle(sx, sy, currentCell.Width, s)
 							e.setCellInEditArea(sx, sy, s, '^', 1)
 							e.setCellInEditArea(sx+1, sy, s, currentCell.Ch+64, 1)
 						}
@@ -1373,9 +1398,7 @@ func (e *Editorleaf) drawLineWithCompute(
 					startLogicalRowByteIndex = bytePosOfRow
 					if isDraw {
 						s := theme.ColorMarkContinue
-						if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
-							s = s.Background(theme.ColorColumnLimitOverflowBackground)
-						}
+						s = e.columnOverStyle(sx, sy, currentCell.Width, s)
 						e.setCellInEditArea(sx, sy, s, theme.MarkContinue, 1)
 						/*
 							e.fillInEditArea(screen.Rect{ // 実行されていない、もしくは意味ない？
@@ -1395,9 +1418,7 @@ func (e *Editorleaf) drawLineWithCompute(
 							currentCell.Ch, currentCell.Style, 1, 1, currentCell.Class,
 							sy-startScreenY, sx, hangingIndentWidth)
 						if isDraw {
-							if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
-								s = s.Background(theme.ColorColumnLimitOverflowBackground)
-							}
+							s = e.columnOverStyle(sx, sy, currentCell.Width, s)
 							e.setCellInEditArea(sx, sy, s, '^', 1)                 // ★★
 							e.setCellInEditArea(sx+1, sy, s, currentCell.Ch+64, 1) // ★★
 						}
@@ -1406,9 +1427,7 @@ func (e *Editorleaf) drawLineWithCompute(
 							currentCell.Ch, currentCell.Style, currentCell.Size, currentCell.Width, currentCell.Class,
 							sy-startScreenY, sx, hangingIndentWidth)
 						if isDraw {
-							if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
-								s = s.Background(theme.ColorColumnLimitOverflowBackground)
-							}
+							s = e.columnOverStyle(sx, sy, currentCell.Width, s)
 							e.setCellInEditArea(sx, sy, s, currentCell.Ch, currentCell.Width) // ★★
 						}
 					}
@@ -1421,9 +1440,7 @@ func (e *Editorleaf) drawLineWithCompute(
 				sx = breakpoint.LogicalRowWidth
 				if isDraw {
 					s := theme.ColorMarkContinue
-					if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
-						s = s.Background(theme.ColorColumnLimitOverflowBackground)
-					}
+					s = e.columnOverStyle(sx, sy, currentCell.Width, s)
 					e.setCellInEditArea(sx, sy, s, theme.MarkContinue, 1)
 					e.fillInEditArea(screen.Rect{X: sx + 1, Y: sy, // 必要
 						Width: contentWidth - (sx + 1), Height: 1},
@@ -1455,9 +1472,7 @@ func (e *Editorleaf) drawLineWithCompute(
 				sy-startScreenY, sx, hangingIndentWidth)
 
 			if isDraw {
-				if isNoSpanStyle && e.isColumnOver(sx, sy, currentCell.Width) {
-					currentCell.Style = currentCell.Style.Background(theme.ColorColumnLimitOverflowBackground)
-				}
+				currentCell.Style = e.columnOverStyle(sx, sy, currentCell.Width, currentCell.Style)
 				e.setCellInEditArea(sx, sy, currentCell.Style, currentCell.Ch, currentCell.Width) // ★★
 			}
 			if isLastCh {
@@ -1700,9 +1715,9 @@ func (e *Editorleaf) drawLine(
 						style = style.Background(theme.ColorColumnLimitOverflowBackground)
 					}
 				*/
-				if e.isColumnOver(sx, sy, cell.Width) {
-					style = style.Background(theme.ColorColumnLimitOverflowBackground)
-				}
+				// Only a default background becomes the overflow one: a
+				// background of its own (search results, ...) is kept.
+				style = e.columnOverStyle(sx, sy, cell.Width, style)
 				e.setCellInEditArea(sx, sy, style, cell.Ch, cell.Width)
 			}
 			sx += cell.Width
