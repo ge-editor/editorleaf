@@ -141,6 +141,22 @@ func (e *Editorleaf) ToggleCaseSelect() {
 	gecore.Echo.AddText(CaseTypes[next])
 }
 
+// DeleteCaseSelect deletes the selected text. The text is already in the kill
+// buffer (it was put there when the range was made or last changed), so it
+// is not put there again. The caller leaves the mode afterwards.
+func (e *Editorleaf) DeleteCaseSelect() {
+	s := &e.caseSel
+	if !s.active {
+		return
+	}
+
+	if e.deleteRegion(s.start, s.end) == nil {
+		return
+	}
+
+	e.SetRowsPos(s.start)
+}
+
 // EndCaseSelect leaves the mode: the range is not shown any more. The text
 // and the kill buffer stay as they are. It does nothing if the mode is off.
 func (e *Editorleaf) EndCaseSelect() {

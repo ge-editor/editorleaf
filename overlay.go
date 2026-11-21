@@ -205,7 +205,7 @@ func (e *Editorleaf) paintRowOverlays(rowIndex, startScreenY int, cache []locale
 			if sp.Color == theme.ColorLastMark {
 				bg = theme.ColorLastMarkBackground
 			}
-			e.paintCell(startScreenY, hangingIndentWidth, cell, cell.Style.Background(bg))
+			e.paintMarkCell(startScreenY, hangingIndentWidth, cell, cell.Style.Background(bg))
 		}
 	}
 	if hl := e.meta.HighlightLayer.Peek(highlight.LayerCursor); hl != nil {
@@ -257,6 +257,35 @@ func trailingWhitespaceStart(cache []locale.Cell) int {
 		p += cell.Size
 	}
 	return start
+}
+
+// markCellWidth is how many columns of the cell a mark colors. A tab is drawn
+// as wide as it is to the next tab stop, but the mark is on the first column
+// of it, as on any other character; the rest stays as it was drawn.
+func markCellWidth(cell locale.Cell) int {
+	if locale.Is(cell, locale.TAB) && cell.Width > 1 {
+		return 1
+	}
+
+	return cell.Width
+}
+
+// paintMarkCell is paintCell for a mark: a tab gets the color of the mark on
+// its first column only (see markCellWidth).
+func (e *Editorleaf) paintMarkCell(startScreenY, hangingIndentWidth int, cell locale.Cell, style tcell.Style) {
+	width := markCellWidth(cell)
+	if width == cell.Width {
+		e.paintCell(startScreenY, hangingIndentWidth, cell, style)
+		return
+	}
+
+	y := startScreenY + cell.LogicalRowIndex
+	x := cell.TotalWidthLogicalRow
+	if cell.LogicalRowIndex > 0 {
+		x += hangingIndentWidth // cacheCellInfo leaves it out
+	}
+
+	e.setCellInEditArea(x, y, style, cell.Ch, width)
 }
 
 // paintCell draws cell again with style, at the position it was cached for.

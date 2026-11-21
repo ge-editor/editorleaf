@@ -52,3 +52,23 @@ func TestTrailingWhitespaceStart(t *testing.T) {
 		})
 	}
 }
+
+// A mark on a tab colors the first column of it, not the width of the tab.
+func TestMarkCellWidth(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cell locale.Cell
+		want int
+	}{
+		{"tab of 4", locale.Cell{Ch: '»', Size: 1, Width: 4, Class: locale.TAB}, 1},
+		{"tab of 8", locale.Cell{Ch: '»', Size: 1, Width: 8, Class: locale.TAB}, 1},
+		{"tab of 1 (at the last column of a tab stop)", locale.Cell{Ch: '»', Size: 1, Width: 1, Class: locale.TAB}, 1},
+		{"letter", locale.Cell{Ch: 'a', Size: 1, Width: 1}, 1},
+		{"wide character", locale.Cell{Ch: 'あ', Size: 3, Width: 2}, 2}, // all of it
+		{"control code ^X", locale.Cell{Ch: 1, Size: 1, Width: 2, Class: locale.CONTROLCODE}, 2},
+	} {
+		if got := markCellWidth(tc.cell); got != tc.want {
+			t.Errorf("%s: markCellWidth = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}

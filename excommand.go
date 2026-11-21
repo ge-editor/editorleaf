@@ -69,6 +69,10 @@ func (e *Editorleaf) Commands() []excommand.ExCommand {
 		e.codeActionCommand(),
 		e.completeCommand(),
 
+		e.gotoBracketCommand(),
+		e.commentRegionCommand(),
+		e.openURLCommand(),
+
 		e.shellCommand(),
 		e.shellRegionCommand(),
 		e.shellInContentDirCommand(),
