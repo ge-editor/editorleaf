@@ -92,3 +92,24 @@ func TestCodeActionLine(t *testing.T) {
 		}
 	}
 }
+
+func TestHoverDisplayText(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{
+			"code fence and text",
+			"```go\nfunc Foo(a int) string\n```\n\nFoo returns a string.\n",
+			"func Foo(a int) string\n\nFoo returns a string.",
+		},
+		{"blank lines are not doubled", "a\n\n\n\nb", "a\n\nb"},
+		{"blanks at the ends, the indentation stays", "\n\n  a  \n\n", "  a"},
+		{"CRLF", "a\r\n\r\nb\r\n", "a\n\nb"},
+		{"fence with spaces and a language", "  ```go  \nx\n  ```", "x"},
+		{"empty", "", ""},
+		{"only a fence", "```\n```", ""},
+		{"no change", "one line", "one line"},
+	} {
+		if got := hoverDisplayText(tc.in); got != tc.want {
+			t.Errorf("%s: hoverDisplayText(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+}

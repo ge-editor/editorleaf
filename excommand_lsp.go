@@ -16,7 +16,7 @@ import (
 
 // Commands backed by the language service (see LanguageService):
 //
-//	ESC x lsp-hover            documentation of the symbol at the cursor, in the echo area
+//	ESC x lsp-hover            documentation of the symbol at the cursor (F1), shown by the hover viewer (SetHoverViewer)
 //	ESC x lsp-goto-definition  jump to its definition
 //	ESC x lsp-find-references  where the symbol at the cursor is used, chosen from a list
 //	ESC x lsp-completion       completion at the cursor, chosen from a list
@@ -52,7 +52,17 @@ func echoError(err error) {
 	gecore.Echo.AddText(err.Error()).WithStyle(theme.ColorEchoRed)
 }
 
-func (e *Editorleaf) hover() {
+// LspHoverText asks the language server for the documentation of the symbol
+// at the cursor and calls show with it, ready to read (see hoverDisplayText),
+// when it comes: not at all if the cursor has moved on, there is nothing to
+// show or an error (those are said in the echo area). With show nil the first
+// lines of the documentation go to the echo area. Most callers want LspHover,
+// which uses the hover viewer of the application.
+//
+// When another minibuffer is open by then (a prompt that the user started
+// while the server was answering) it is not taken over: the answer goes to
+// the echo area, and show is not called.
+func (e *Editorleaf) LspHoverText(show func(text string)) {
 	if languageService == nil {
 		gecore.Echo.AddText("No language service")
 		return
@@ -67,12 +77,77 @@ func (e *Editorleaf) hover() {
 		if e.editBuffer != eb || e.meta.RowsPos != pos {
 			return // the cursor has moved on; the answer is no longer about what it is on
 		}
-		if text == "" {
+
+		shown := hoverDisplayText(text)
+		if shown == "" {
 			gecore.Echo.AddText("No documentation here")
 			return
 		}
-		gecore.Echo.AddText(firstLines(text, 3))
+
+		if show == nil || MinibufferManager().IsActive() {
+			gecore.Echo.AddText(firstLines(shown, 3))
+			return
+		}
+
+		show(shown)
 	})
+}
+
+// HoverViewer shows the documentation of lsp-hover (ready to read, several
+// rows) to the user: the application's way, installed with SetHoverViewer.
+type HoverViewer func(text string)
+
+var hoverViewer HoverViewer
+
+// SetHoverViewer installs the viewer of the documentation of lsp-hover, for
+// the command and for the key (LspHover). Call it from init() or main();
+// without one the documentation goes to the echo area, its first lines.
+func SetHoverViewer(v HoverViewer) {
+	hoverViewer = v
+}
+
+// LspHover is lsp-hover: the documentation of the symbol at the cursor, shown
+// by the hover viewer (see SetHoverViewer). The key F1 runs it.
+func (e *Editorleaf) LspHover() {
+	e.LspHoverText(hoverViewer)
+}
+
+func (e *Editorleaf) hover() {
+	e.LspHover()
+}
+
+// hoverDisplayText makes the documentation that a language server returns
+// (Markdown) ready to read in the minibuffer: the lines of the code fences
+// are taken out, blank lines are not doubled, and no blank is left at the
+// ends of the lines and of the text.
+func hoverDisplayText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+
+	var out []string
+
+	blank := true // no blank line at the start
+
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimRight(line, " \t\r")
+
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			continue // the fence; the code in it stays
+		}
+
+		if line == "" {
+			if blank {
+				continue
+			}
+
+			blank = true
+		} else {
+			blank = false
+		}
+
+		out = append(out, line)
+	}
+
+	return strings.TrimRight(strings.Join(out, "\n"), "\n")
 }
 
 func (e *Editorleaf) LspGotoDefinition() {

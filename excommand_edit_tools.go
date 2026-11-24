@@ -32,7 +32,8 @@ func (e *Editorleaf) commentRegionCommand() *Command {
 	}
 }
 
-var urlSchemeRe = regexp.MustCompile(`(?i)^(?:https?|ftp|file)://\S+$`)
+// var urlSchemeRe = regexp.MustCompile(`(?i)^(?:https?|ftp|file)://\S+$`)
+var urlSchemeRe = regexp.MustCompile(`^(?i:https?|ftp|file)://\S+$`)
 
 func (e *Editorleaf) openURLCommand() *Command {
 	return &Command{

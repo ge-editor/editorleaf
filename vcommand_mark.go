@@ -195,7 +195,7 @@ func (e *Editorleaf) FilterMarksWith(chars string, m *pathscope.Matcher, textOf 
 		// filter): the caller may collect what it needs for the display.
 		text := textOf(mk)
 		if chars != "" {
-			if utils.ContainsAllCharacters(text, chars) {
+			if utils.ContainsOrderedAllCharacters(text, chars) {
 				items = append(items, mk)
 			}
 		} else {

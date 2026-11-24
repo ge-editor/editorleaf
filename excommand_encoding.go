@@ -36,7 +36,7 @@ func filterNames(all []string, input string) []string {
 	input = strings.TrimSpace(input)
 	names := []string{}
 	for _, n := range all {
-		if input == "" || utils.ContainsAllCharacters(n, input) {
+		if input == "" || utils.ContainsOrderedAllCharacters(n, input) {
 			names = append(names, n)
 		}
 	}

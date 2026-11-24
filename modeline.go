@@ -70,8 +70,7 @@ func (e *Editorleaf) drawModeline() {
 		}
 	}
 
-	s := fmt.Sprintf(" %s %s",
-		readonlyModified, e.editBuffer.GetDispPath())
+	s := fmt.Sprintf(" %s %s", readonlyModified, e.editBuffer.GetDispPath())
 	style = theme.ColorModelineInactive
 	if e.active {
 		style = theme.ColorModeLineActive2

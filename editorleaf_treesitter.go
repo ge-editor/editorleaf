@@ -108,6 +108,10 @@ var syntaxUIUpdates struct {
 	queue []func()
 }
 
+// DispatchUI runs fn on the UI goroutine, before the next event is handled.
+// It may be called from any goroutine (a background search of the explorer).
+func DispatchUI(fn func()) { dispatchUI(fn) }
+
 // dispatchUI queues fn on syntaxUIUpdates and wakes the UI event loop.
 func dispatchUI(fn func()) {
 	syntaxUIUpdates.Lock()

@@ -433,20 +433,17 @@ func (e *Editorleaf) syncCursorAndBufferForEdit(sync syncType, start, end editbu
 
 			if editor != e {
 				editor.meta.RowsPos.AdjustForInsertion(start, end)
-				// Update buffer boundary array if rows were inserted.
-				if end.RowIndex-start.RowIndex > 0 {
-					editor.bsArray.Insert(start.RowIndex+1, end.RowIndex-(start.RowIndex+1))
-				}
+				// The boundaries (editor.bsArray) are not touched here: every
+				// caller has done them for all the editors (ForEachLeafAll),
+				// and doing it here too counted the rows twice for the
+				// other editors of the same file.
 			}
 		case DELETE:
 			// editor.meta.Mark.AdjustForDeletion(start, end)
 
 			if editor != e {
 				editor.meta.RowsPos.AdjustForDeletion(start, end)
-				// Update buffer boundary array if rows were deleted.
-				if count := end.RowIndex - start.RowIndex; count > 0 {
-					editor.bsArray.Delete(start.RowIndex+1, count)
-				}
+				// The boundaries are not touched here; see INSERT.
 			}
 		}
 
@@ -521,7 +518,7 @@ func (e *Editorleaf) GetBuffersFilterByCharacters(chars string) *buffer.BufferSe
 		   		}
 		*/
 		if chars != "" {
-			if utils.ContainsAllCharacters(text, chars) {
+			if utils.ContainsOrderedAllCharacters(text, chars) {
 				items = append(items, mk)
 			}
 		} else {
@@ -741,7 +738,9 @@ func (e *Editorleaf) drawEditorleaf(ctx context.Context) bool {
 	*/
 
 	if e.mode == ModeEditor {
-		lineNumberWidth := digitsScreenWidth(e.RowsLength()) + 1
+		// A space on each side of the number: the cells of the gutter marks
+		// (see gutter.go).
+		lineNumberWidth := digitsScreenWidth(e.RowsLength()) + 2
 		// The display width for the number of rows has been changed.
 		if lineNumberWidth != e.lineNumberWidth {
 			e.lineNumberWidth = lineNumberWidth
@@ -1362,7 +1361,7 @@ func (e *Editorleaf) drawLineWithCompute(
 						}
 					}
 					sx += prevCell.Width
-					s = currentCell.Style // ★★
+					s = currentCell.Style                           // ★★
 					if locale.Is(currentCell, locale.CONTROLCODE) { // ★★
 						// これを確認する必要があるか？
 						cacheCellInfo(&runeWidth, bytePosOfRow,
@@ -1412,7 +1411,7 @@ func (e *Editorleaf) drawLineWithCompute(
 					sy++
 					sx = 0 + hangingIndentWidth
 					wrapped = true
-					s := currentCell.Style // ★★
+					s := currentCell.Style                          // ★★
 					if locale.Is(currentCell, locale.CONTROLCODE) { // ★★
 						cacheCellInfo(&runeWidth, bytePosOfRow,
 							currentCell.Ch, currentCell.Style, 1, 1, currentCell.Class,
@@ -1766,6 +1765,9 @@ func (e *Editorleaf) drawLine(
 }
 
 func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, h int) {
+	rows := h // h is changed below
+	defer e.drawGutterMarks(rowIndex, startScreenY, cursorLineY, rows)
+
 	if e.lineNumberWidth > 0 {
 		y := e.editArea.Y + startScreenY
 		if startScreenY < 0 {

@@ -27,6 +27,22 @@ func TestFindURL(t *testing.T) {
 		{"only url of the row, cursor elsewhere", "a https://example.com/a b", 0, "https://example.com/a", true},
 		{"two urls, cursor on neither", "a https://x.example/1 b https://y.example/2", 0, "", false},
 		{"two urls, cursor on the second", "a https://x.example/1 b https://y.example/2", 30, "https://y.example/2", true},
+		// gopls puts Markdown links in its documentation. Text and target are
+		// not one URL, though there is no space between them.
+		{"markdown link, url as text: the text", "[https://a.example/x](https://a.example/x)", 5, "https://a.example/x", true},
+		{"markdown link, url as text: the target", "[https://a.example/x](https://a.example/x)", 30, "https://a.example/x", true},
+		{"markdown link, url as text, cursor elsewhere", "see [https://a.example/x](https://a.example/x) too", 0, "https://a.example/x", true},
+		{"markdown link: the text is not a url", "[pkg](https://pkg.go.dev/p#T)", 8, "https://pkg.go.dev/p#T", true},
+		{"markdown link: the text is a url, the target another", "[https://a.example](https://b.example)", 25, "https://b.example", true},
+		{"markdown link: the text of it", "[https://a.example](https://b.example)", 5, "https://a.example", true},
+		{"two links in a row", "[x](https://a.example)[y](https://b.example)", 8, "https://a.example", true},
+		{"two links in a row, the second", "[x](https://a.example)[y](https://b.example)", 34, "https://b.example", true},
+		{"two different urls, cursor on neither", "[https://a.example](https://b.example)", 0, "", false},
+		// The letters s and k: the case folding of the scheme must not reach
+		// the characters that end a URL (U+017F and U+212A fold to them).
+		{"s and k in the url", "see https://pkg.go.dev/strings#Builder.WriteString now", 10, "https://pkg.go.dev/strings#Builder.WriteString", true},
+		{"S and K in the url", "https://example.com/tasks?kind=ks&S=K", 3, "https://example.com/tasks?kind=ks&S=K", true},
+		{"upper case url with s and k", "HTTPS://EXAMPLE.COM/KEYS", 2, "HTTPS://EXAMPLE.COM/KEYS", true},
 		{"no url", "just text", 3, "", false},
 		{"not a safe scheme", "javascript://x and mailto:a@b", 3, "", false},
 	} {

@@ -1215,37 +1215,24 @@ func (e *Editorleaf) Undo() {
 				a.Data,
 			)
 
+			// DELETE is recorded with After == Before (DeleteRune, KillLine): the
+			// extent of what is put back is in Data. With a.After here no row was
+			// counted when a newline came back, the layouts of all the rows below
+			// stayed one row off, and a row was drawn as the next one when the
+			// two had the same length. Redo takes the extent from Data too.
+			end := e.cursorAfterDelete(a)
+
 			e.syncCursorAndBufferForEdit(
 				INSERT,
 				a.Before,
-				a.After,
+				end,
 			)
 
 			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
 			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
-			e.rebuildBufferState(a.Before, a.After, editbuffer.INSERT)
+			e.rebuildBufferState(a.Before, end, editbuffer.INSERT)
 
 			e.meta.RowsPos = a.Before
-
-			/*
-				case editbuffer.DELETE_BACKWARD:
-					gelog.Debug("Undo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
-
-					// 2026-10-03 Crash 修正
-					e.meta.RowsPos = a.After // (2. の統一後。start 側)
-					e.insertRows(a.Data, false)
-					e.syncCursorAndBufferForEdit(
-						INSERT,
-						a.After,
-						a.Before,
-					)
-
-					// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
-					// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
-					e.rebuildBufferState(a.After, a.Before, editbuffer.INSERT)
-
-					// 2026-10-03 Crash 修正
-					// e.meta.RowsPos = a.After */
 
 		case editbuffer.DELETE_BACKWARD:
 			gelog.Debug("Undo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
@@ -1290,42 +1277,14 @@ func (e *Editorleaf) Redo() {
 		case editbuffer.INSERT:
 			gelog.Debug("Redo INSERT", "a", a.Data.JoinString([]byte{'\n'}))
 			e.meta.RowsPos = a.Before
-			e.insertRows(a.Data, false)
-			// Keep editor state synchronized with the redo operation.
-			e.syncCursorAndBufferForEdit(
-				INSERT,
-				a.Before,
-				a.After,
-			)
 
-			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
-			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
-			e.rebuildBufferState(a.Before, a.After, editbuffer.INSERT)
+			// insertRows does all of it: the text, the boundaries of every
+			// editor (ClearRow, Insert) and syncCursorAndBufferForEdit. Doing
+			// the last two here again counted the new rows twice, so the
+			// layouts of the rows below moved down by that many rows.
+			e.insertRows(a.Data, false)
 
 			e.meta.RowsPos = a.After
-
-			/* case editbuffer.DELETE_BACKWARD:
-			gelog.Debug("Redo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))
-
-			e.meta.RowsPos = a.Before
-			e.editBuffer.RemoveRegion(
-				// 2026-10-03 Crash 修正
-				// a.Before,
-				// a.After,
-				a.After,
-				a.Before,
-			)
-			e.syncCursorAndBufferForEdit(
-				DELETE,
-				a.Before,
-				a.After,
-			)
-
-			// Undo による行構造の変化を各 Editorleaf の bsArray に反映する。
-			// Apply the row-structure changes caused by the undo operation to each Editorleaf's bsArray.
-			e.rebuildBufferState(a.Before, a.After, editbuffer.DELETE)
-
-			e.meta.RowsPos = a.Before */
 
 		case editbuffer.DELETE_BACKWARD:
 			gelog.Debug("Redo DELETE_BACKWARD", "after", fmt.Sprintf("%d:%d", a.After.RowIndex, a.After.ColIndex), "before", fmt.Sprintf("%d:%d", a.Before.RowIndex, a.Before.ColIndex), "data", a.Data.JoinString([]byte{'\n'}))

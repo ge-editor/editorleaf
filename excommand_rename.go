@@ -87,6 +87,27 @@ func renameNewName(args []string) string {
 	return commandText(args, "lsp-rename-symbol")
 }
 
+// RenameUnavailableReason says why a rename cannot be done in this buffer, or
+// returns "" if it can. It is for asking before the new name is asked for;
+// rename checks it again.
+func (e *Editorleaf) RenameUnavailableReason() string {
+	switch {
+	case languageService == nil:
+		return "No language service"
+	case previewPicker == nil:
+		// The user must always see what a rename does before it is done.
+		return "No preview picker: rename needs one to confirm"
+	case e.GetPath() == "":
+		return "Rename needs a buffer with a file"
+	}
+
+	if c, ok := languageService.(LanguageServerChecker); ok && !c.HasLanguageServer(e.editBuffer) {
+		return "No language server for this buffer"
+	}
+
+	return ""
+}
+
 func (e *Editorleaf) rename(args []string) {
 	newName := renameNewName(args)
 	if newName == "" || strings.ContainsAny(newName, " \t") {
@@ -94,16 +115,8 @@ func (e *Editorleaf) rename(args []string) {
 		return
 	}
 
-	switch {
-	case languageService == nil:
-		gecore.Echo.AddText("No language service")
-		return
-	case previewPicker == nil:
-		// The user must always see what a rename does before it is done.
-		gecore.Echo.AddText("No preview picker: rename needs one to confirm")
-		return
-	case e.GetPath() == "":
-		gecore.Echo.AddText("Rename needs a buffer with a file")
+	if reason := e.RenameUnavailableReason(); reason != "" {
+		gecore.Echo.AddText(reason)
 		return
 	}
 

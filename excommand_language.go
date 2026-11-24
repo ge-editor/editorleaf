@@ -54,7 +54,7 @@ func LanguageNames(input string) []string {
 	input = strings.TrimSpace(input)
 	names := []string{}
 	for _, m := range lang.Modes.GetModes() {
-		if input == "" || utils.ContainsAllCharacters(m.Name(), input) {
+		if input == "" || utils.ContainsOrderedAllCharacters(m.Name(), input) {
 			names = append(names, m.Name())
 		}
 	}

@@ -11,6 +11,13 @@ type Location struct {
 	Text string
 }
 
+// GotoLocation moves to pos of the file path, opening the file in this pane
+// when it is another file. A mark is left at the current cursor first, so
+// the usual mark commands go back.
+func (e *Editorleaf) GotoLocation(path string, pos editbuffer.RowsPos) error {
+	return e.gotoLocation(Location{Path: path, Pos: pos})
+}
+
 // LanguageService is what the editor asks of the language servers. editorleaf
 // does not know how they work (the packages that do depend on editorleaf,
 // not the other way round), so the application installs an implementation
@@ -52,6 +59,13 @@ type LanguageService interface {
 	// Complete returns the completion candidates at pos, in the server's
 	// order of preference.
 	Complete(eb *editbuffer.EditBuffer, pos editbuffer.RowsPos, done func(items []CompletionItem, err error))
+}
+
+// LanguageServerChecker is implemented by a LanguageService that can tell, without
+// asking the server, whether a buffer has a language server. It is optional: a
+// service without it is taken to be able to answer, and says no when asked.
+type LanguageServerChecker interface {
+	HasLanguageServer(eb *editbuffer.EditBuffer) bool
 }
 
 // TextEdit replaces [Start, End) with NewText (row and byte column).
@@ -181,4 +195,3 @@ type CodeAction struct {
 	Preferred bool // the server's suggestion
 	Edit      *WorkspaceEdit
 }
-

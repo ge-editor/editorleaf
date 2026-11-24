@@ -17,7 +17,12 @@ import (
 // followed by the next word with no space ("https://example.com/aです"), and
 // browsers copy a URL in its percent-encoded (ASCII) form. The punctuation
 // that ends a sentence is taken off by trimURL.
-var urlRe = regexp.MustCompile("(?i)(?:https?|ftp|file)://[^\\s<>\"'`\\x00-\\x1f\\x{80}-\\x{10FFFF}]+")
+//
+// The case folding is for the scheme only, (?i:...): applied to the class it
+// would fold the characters of \x{80}-\x{10FFFF} too, and U+017F and U+212A
+// (the long s and the Kelvin sign) fold to 's' and 'k', which would be left out
+// of the URL: "https://pkg.go.dev" would end at "https://p".
+var urlRe = regexp.MustCompile("(?i:https?|ftp|file)://[^\\s<>\"'`\\x00-\\x1f\\x{80}-\\x{10FFFF}]+")
 
 // trimURL takes off what a URL is followed by in text: the punctuation of a
 // sentence, and a closing bracket that has no opening one in the URL
@@ -43,6 +48,52 @@ func trimURL(u string) string {
 	return u
 }
 
+// urlSchemeAtStart is true for a piece that begins with a URL scheme.
+var urlSchemeAtStart = regexp.MustCompile("(?i)^(?:https?|ftp|file)://")
+
+// urlSpan is a part [start, end) of a match of urlRe.
+type urlSpan struct{ start, end int }
+
+// splitMarkdownLinks cuts a match of urlRe where Markdown links meet. A link
+// "[https://a.example](https://a.example)" has no space in it, so urlRe takes
+// it for one URL; "](" ends the one and starts the other, and so does ")["
+// ("[x](https://a.example)[y](https://b.example)"). The pieces that do not
+// begin with a scheme (the text of a link, "[y") are not URLs.
+func splitMarkdownLinks(m string) []urlSpan {
+	var spans []urlSpan
+
+	start := 0
+
+	for i := 0; i < len(m); {
+		switch {
+		case strings.HasPrefix(m[i:], "]("):
+			spans = append(spans, urlSpan{start, i})
+			i += 2
+			start = i
+
+		case strings.HasPrefix(m[i:], ")["):
+			spans = append(spans, urlSpan{start, i + 1}) // the ")" is the end of the URL
+			i += 2
+			start = i - 1 // "[": text of a link, dropped below
+
+		default:
+			i++
+		}
+	}
+
+	spans = append(spans, urlSpan{start, len(m)})
+
+	out := spans[:0]
+
+	for _, sp := range spans {
+		if urlSchemeAtStart.MatchString(m[sp.start:sp.end]) {
+			out = append(out, sp)
+		}
+	}
+
+	return out
+}
+
 // findURL returns the URL at byte column col of row: the one that covers the
 // cursor (or ends right at it). Failing that, the only URL of the row, so that
 // the command works from anywhere on a line that has one.
@@ -50,16 +101,35 @@ func findURL(row []byte, col int) (url string, ok bool) {
 	var all []string
 
 	for _, m := range urlRe.FindAllIndex(row, -1) {
-		u := trimURL(string(row[m[0]:m[1]]))
-		if u == "" {
-			continue
+		for _, sp := range splitMarkdownLinks(string(row[m[0]:m[1]])) {
+			from := m[0] + sp.start
+
+			u := trimURL(string(row[from : m[0]+sp.end]))
+			if u == "" {
+				continue
+			}
+
+			if end := from + len(u); col >= from && col <= end {
+				return u, true
+			}
+
+			all = append(all, u)
+		}
+	}
+
+	// Two links to one address ("[a.example](a.example)") are one URL.
+	if len(all) > 1 {
+		same := true
+
+		for _, u := range all[1:] {
+			if u != all[0] {
+				same = false
+			}
 		}
 
-		if end := m[0] + len(u); col >= m[0] && col <= end {
-			return u, true
+		if same {
+			all = all[:1]
 		}
-
-		all = append(all, u)
 	}
 
 	if len(all) == 1 {

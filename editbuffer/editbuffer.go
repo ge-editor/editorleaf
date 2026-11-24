@@ -111,14 +111,16 @@ func (eb *EditBuffer) init() {
 
 	dir := ""
 	dir, eb.base = filepath.Split(eb.path)
-	eb.dispPath = eb.base
+	// eb.dispPath = filepath.Join(filepath.Base(eb.path[:len(eb.path)-len(eb.base)]), eb.base)
+	eb.SetDispPath()
+
 	dir = utils.LastPartOfPath(dir)
-	wd, err := os.Getwd()
+	/* wd, err := os.Getwd()
 	if err == nil {
 		if utils.IsSameFile(wd, dir) {
 			eb.dispPath = filepath.Join(dir, eb.dispPath)
 		}
-	}
+	} */
 
 	eb.ext = filepath.Ext(eb.path)
 }
@@ -396,10 +398,24 @@ func (eb *EditBuffer) SetPath(path string) {
 	eb.path = path
 	eb.base = filepath.Base(path)
 	eb.ext = filepath.Ext(path)
-	eb.dispPath = eb.base
+	// eb.dispPath = eb.base
+	// eb.dispPath = filepath.Join(filepath.Base(eb.path[:len(eb.path)-len(eb.base)]), eb.base)
+	eb.SetDispPath()
 	// The state recorded for the old path means nothing for the new one (an
 	// existing file was already confirmed to be overwritten by Save as).
 	eb.recordDisk()
+}
+
+func (eb *EditBuffer) SetDispPath() {
+	userHomeDir, err := os.UserHomeDir()
+	if err == nil {
+		if utils.IsSameFile(filepath.Dir(eb.path), userHomeDir) {
+			eb.dispPath = "~/" + eb.base
+			return
+		}
+	}
+
+	eb.dispPath = filepath.Join(filepath.Base(eb.path[:len(eb.path)-len(eb.base)]), eb.base)
 }
 
 func (eb *EditBuffer) GetPath() string {

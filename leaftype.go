@@ -113,6 +113,13 @@ func (l *LeafType) DispatchLeafRequest(destination, behavior string, flag tree.O
 	case tree.OpenRequest:
 		handled, err := e.openTarget(req)
 		f(handled, err)
+	case tree.ReplaceRequest:
+		// The dispatcher does not hand errors back to the sender, so they
+		// are said here.
+		if err := e.replaceRequest(req); err != nil {
+			echoError(err)
+		}
+		f(true, nil)
 	}
 }
 

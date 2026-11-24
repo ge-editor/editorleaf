@@ -130,6 +130,16 @@ func (m *MinibufferManagerStruct) SetFieldString(i int, content string) {
 	m.session.Fields[i].Editor.SetRows(rows)
 }
 
+// SetFieldStringAtEnd replaces the content of field i with content and puts
+// the cursor of the field at its end.
+func (m *MinibufferManagerStruct) SetFieldStringAtEnd(i int, content string) {
+	m.SetFieldString(i, content)
+	if m.session == nil || i < 0 || i >= len(m.session.Fields) {
+		return
+	}
+	m.session.Fields[i].Editor.moveCursorToEndOfContent()
+}
+
 func (m *MinibufferManagerStruct) FocusField(i int) {
 	if m.session != nil {
 		m.session.SetFocus(i)
