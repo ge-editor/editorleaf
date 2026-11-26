@@ -42,8 +42,13 @@ func (rs *Rows_) insertRegion(rowIndex, colIndex int, rows Rows_) {
 	// Insert the remaining rows.
 	insertIndex := rowIndex + 1
 
+	// The middle rows are cloned: the caller (Yank, Undo, Redo) keeps rows
+	// in the kill buffer or the undo stack. If the buffer shared their
+	// backing arrays, an in-place edit of the buffer row (Row_.Delete uses
+	// slices.Delete, which zeroes the bytes it frees since Go 1.22) would
+	// write NUL bytes into the kill buffer / undo data.
 	for i := 1; i < len(rows)-1; i++ {
-		(*rs).InsertRow(insertIndex, rows[i])
+		(*rs).InsertRow(insertIndex, rows[i].Clone())
 		insertIndex++
 	}
 
@@ -119,7 +124,6 @@ func (rs *Rows_) region(start, end RowsPos, doRemove bool) Rows_ {
 	// Top row: remove everything from start.ColIndex to the end.
 	removed = append(removed,
 		Row_(topRow.Bytes()[start.ColIndex:]).Clone(),
-		// topRow.Copy(start.ColIndex, topRow.Length()),
 	)
 
 	if doRemove {
@@ -134,7 +138,6 @@ func (rs *Rows_) region(start, end RowsPos, doRemove bool) Rows_ {
 	// Bottom row: remove everything from the beginning to end.ColIndex.
 	removed = append(removed,
 		Row_(bottomRow.Bytes()[:end.ColIndex]).Clone(),
-		// bottomRow.Copy(0, end.ColIndex),
 	)
 
 	if doRemove {

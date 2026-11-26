@@ -57,6 +57,7 @@ func (e *Editorleaf) Commands() []excommand.ExCommand {
 		e.spellAddCommand(),
 		e.spellIgnoreCommand(),
 		e.spellIdentifiersCommand(),
+		e.stickyCommand(),
 
 		e.hoverCommand(),
 		e.definitionCommand(),

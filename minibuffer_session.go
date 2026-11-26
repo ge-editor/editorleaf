@@ -32,6 +32,14 @@ type Session struct {
 	// boxes of a search. It is called at every draw.
 	Header func() string
 
+	// A form can have a row of options after its fields (the check boxes of
+	// a search). Tab and Shift+Tab move the focus Search -> Replace -> the
+	// options -> Search. While the options have the focus no editor is
+	// active, and the keys go to OptionKeys (Space, the cursor keys, ...).
+	// OptionKeys is nil for a form without options.
+	OptionKeys  *keychord.RootNode
+	OptionFocus bool
+
 	// Usage is what the echo line shows while the session is open: its name
 	// and its keys (see gecore.Echo.SetUsage). The minibuffer manager sets
 	// it when the session starts and clears it when the session ends, however
@@ -105,6 +113,7 @@ func NewFormSession(
 }
 
 // SetFocus moves the keys to field i. A hidden or missing field is ignored.
+// While the options have the focus the field is chosen but stays inactive.
 func (s *Session) SetFocus(i int) {
 	if i < 0 || i >= len(s.Fields) || s.Fields[i].Hidden {
 		return
@@ -112,18 +121,52 @@ func (s *Session) SetFocus(i int) {
 	s.Editor.Active(false)
 	s.Focus = i
 	s.Editor = s.Fields[i].Editor
-	s.Editor.Active(true)
+	s.Editor.Active(!s.OptionFocus)
 }
 
-// FocusNext moves the focus to the next visible field, round.
-func (s *Session) FocusNext() {
-	n := len(s.Fields)
-	for k := 1; k < n; k++ {
-		if i := (s.Focus + k) % n; !s.Fields[i].Hidden {
-			s.SetFocus(i)
-			return
+// FocusNext moves the focus to the next visible field, then to the options
+// (when the form has them), round.
+func (s *Session) FocusNext() { s.moveFocus(1) }
+
+// FocusPrev moves the focus the other way round.
+func (s *Session) FocusPrev() { s.moveFocus(-1) }
+
+func (s *Session) moveFocus(dir int) {
+	// A slot is the index of a visible field, or -1 for the options.
+	var slots []int
+	for i, f := range s.Fields {
+		if !f.Hidden {
+			slots = append(slots, i)
 		}
 	}
+	if s.OptionKeys != nil {
+		slots = append(slots, -1)
+	}
+	if len(slots) < 2 {
+		return
+	}
+
+	cur := s.Focus
+	if s.OptionFocus {
+		cur = -1
+	}
+	pos := 0
+	for k, slot := range slots {
+		if slot == cur {
+			pos = k
+			break
+		}
+	}
+	next := slots[(pos+dir+len(slots))%len(slots)]
+
+	if next == -1 {
+		s.Editor.Active(false)
+		s.OptionFocus = true
+		return
+	}
+	s.OptionFocus = false
+	s.SetFocus(next)
+	s.Editor.Active(true)
 }
 
 // SetHidden shows or hides field i. If the focused field is hidden the focus

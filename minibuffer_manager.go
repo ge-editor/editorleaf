@@ -152,6 +152,17 @@ func (m *MinibufferManagerStruct) FocusNextField() {
 	}
 }
 
+func (m *MinibufferManagerStruct) FocusPrevField() {
+	if m.session != nil {
+		m.session.FocusPrev()
+	}
+}
+
+// OptionFocused reports whether the row of options of a form has the focus.
+func (m *MinibufferManagerStruct) OptionFocused() bool {
+	return m.session != nil && m.session.OptionFocus
+}
+
 func (m *MinibufferManagerStruct) SetFieldHidden(i int, hidden bool) {
 	if m.session != nil {
 		m.session.SetHidden(i, hidden)
@@ -382,7 +393,17 @@ func (m *MinibufferManagerStruct) Dispatch(ev tcell.EventKey) keychord.KeyDispat
 		return keychord.DispatchNotFound
 	}
 
-	_, res := m.session.Editor.DispatchKey(ev)
+	var res keychord.KeyDispatchTransition
+	if s := m.session; s.OptionFocus && s.OptionKeys != nil {
+		// The row of options: its keys only. What it does not know is
+		// dropped, so that nothing is typed into the field behind it.
+		_, res = s.OptionKeys.Dispatch(ev)
+		if res == keychord.DispatchNotFound {
+			res = keychord.DispatchExecuted
+		}
+	} else {
+		_, res = s.Editor.DispatchKey(ev)
+	}
 
 	if m.onComplete != nil {
 		m.onComplete(res)

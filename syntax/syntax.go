@@ -53,6 +53,29 @@ type Parser interface {
 	Close()
 }
 
+// Scope is one syntactic region (a function, a type, a Markdown section, ...)
+// whose first row is worth keeping on screen while the cursor is inside it
+// (Sticky Scroll). Rows are buffer row indexes (editbuffer.RowsPos.RowIndex),
+// not wrapped screen rows.
+type Scope struct {
+	// HeaderRow is the first row of the region: the row that is shown.
+	HeaderRow int
+	// EndRow is the last row that belongs to the region (inclusive).
+	EndRow int
+}
+
+// OutlineProvider is optionally implemented by a Parser that can say which
+// regions the buffer consists of. The Worker publishes Outline() together
+// with Spans(), so a Parser that does not implement it is unaffected.
+//
+// Outline returns the scopes sorted by HeaderRow, outer scopes before the
+// scopes they contain, with at most one scope per HeaderRow (the outermost).
+// Like Spans, it is called from the Parser's goroutine, after Parse/Edit.
+// The Worker copies the slice; the Parser keeps ownership of its own.
+type OutlineProvider interface {
+	Outline() []Scope
+}
+
 // Edit is tree-sitter's InputEdit, spelled out so that this package (and
 // anything importing only this package) does not need a parser library's
 // types. Positions are byte offsets / (row, byte column) in a text where

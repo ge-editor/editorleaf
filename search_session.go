@@ -304,10 +304,8 @@ func (e *Editorleaf) MoveNextFoundWord() {
 	}
 	if i >= n {
 		i = n - 1
-		gecore.Echo.AddText("Last search result")
-	} else {
-		gecore.Echo.AddText(fmt.Sprintf("Search result %d/%d", i+1, n))
 	}
+	gecore.Echo.AddText(fmt.Sprintf("Search result %d/%d", i+1, n))
 	e.jumpToSpan(spans, i)
 }
 
@@ -320,13 +318,8 @@ func (e *Editorleaf) MovePrevFoundWord() {
 	}
 
 	cur := toSearchPos(e.meta.RowsPos)
-	i := firstSpanAtOrAfter(spans, cur) - 1 // the last one before the cursor
-	if i < 0 {
-		i = 0
-		gecore.Echo.AddText("First search result")
-	} else {
-		gecore.Echo.AddText(fmt.Sprintf("Search result %d/%d", i+1, n))
-	}
+	i := max(firstSpanAtOrAfter(spans, cur)-1, 0)
+	gecore.Echo.AddText(fmt.Sprintf("Search result %d/%d", i+1, n))
 	e.jumpToSpan(spans, i)
 }
 

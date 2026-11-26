@@ -518,6 +518,8 @@ func (e *Editorleaf) MoveCursorBeginningOfLine() {
 	if newIndexOfLogicalRow < nowIndexOfLogicalRow {
 		e.meta.ScreenPos.Row -= nowIndexOfLogicalRow - newIndexOfLogicalRow
 	}
+
+	e.meta.PrevScreenPos.Col = e.meta.ScreenPos.Col
 }
 
 // Move cursor to the end of logical the line.

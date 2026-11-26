@@ -66,6 +66,13 @@ type entry struct {
 	worker *Worker
 	sinks  []*sink
 	latest []highlight.Span // last published spans; replayed to new sinks
+
+	// outline is the last published Scope list (see OutlineProvider), kept
+	// on the right rows by shiftOutline until the next one arrives. It is
+	// never modified in place: readers (OutlineOf) may keep the slice.
+	// outlineVer changes whenever outline does. Guarded by sinkMu.
+	outline    []Scope
+	outlineVer uint64
 }
 
 var registry = struct {
@@ -179,6 +186,8 @@ func (e *entry) detachWorker() *Worker {
 	e.worker = nil
 	if old != nil {
 		e.latest = nil
+		e.outline = nil
+		e.outlineVer++
 		for _, s := range e.sinks {
 			s.install(nil)
 		}
@@ -257,4 +266,82 @@ func langNameOf(eb *editbuffer.EditBuffer) string {
 		return ""
 	}
 	return (*m).Name()
+}
+
+// OutlineOf returns the scopes (see OutlineProvider) last published for eb
+// and a version that changes whenever they do; (nil, 0) if eb has no parser
+// with an outline. The slice must not be modified. UI goroutine.
+func OutlineOf(eb *editbuffer.EditBuffer) ([]Scope, uint64) {
+	registry.Lock()
+	e := registry.entries[eb]
+	registry.Unlock()
+	if e == nil {
+		return nil, 0
+	}
+
+	e.sinkMu.Lock()
+	defer e.sinkMu.Unlock()
+	return e.outline, e.outlineVer
+}
+
+// setOutline records scopes as the latest outline of w. Like setSpans it
+// runs on the UI goroutine, and scopes of a Worker that is no longer the
+// entry's current one are dropped.
+func (e *entry) setOutline(w *Worker, scopes []Scope) {
+	e.sinkMu.Lock()
+	defer e.sinkMu.Unlock()
+
+	if e.worker != w {
+		return
+	}
+	e.outline = scopes
+	e.outlineVer++
+}
+
+// shiftOutline keeps the rows of the outline on their lines after c, which
+// the parser has not seen yet: rows after the change move by the number of
+// rows it added or removed, scopes whose first row was removed are dropped.
+// The rebuilt outline replaces it as soon as the Worker publishes one.
+// UI goroutine (called from Worker.onChange).
+func (e *entry) shiftOutline(c editbuffer.Change) {
+	e.sinkMu.Lock()
+	defer e.sinkMu.Unlock()
+
+	if len(e.outline) == 0 {
+		return
+	}
+	if c.Kind == editbuffer.ChangeReset {
+		e.outline = nil
+		e.outlineVer++
+		return
+	}
+
+	start, oldEnd := c.Start.RowIndex, c.OldEnd.RowIndex
+	delta := c.NewEnd.RowIndex - oldEnd
+	if delta == 0 && start == oldEnd {
+		return // inside one row: no row moves
+	}
+
+	out := make([]Scope, 0, len(e.outline))
+	for _, s := range e.outline {
+		switch {
+		case s.HeaderRow <= start:
+		case s.HeaderRow <= oldEnd:
+			continue // its first row was removed
+		default:
+			s.HeaderRow += delta
+		}
+		switch {
+		case s.EndRow < start:
+		case s.EndRow < oldEnd:
+			s.EndRow = start
+		default:
+			s.EndRow += delta
+		}
+		if s.EndRow >= s.HeaderRow {
+			out = append(out, s)
+		}
+	}
+	e.outline = out
+	e.outlineVer++
 }

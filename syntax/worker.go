@@ -123,6 +123,10 @@ func (w *Worker) wakeUp() {
 func (w *Worker) onChange(c editbuffer.Change) {
 	// gelog.Debug("syntax", "onChange", c)
 
+	// The outline is rebuilt asynchronously; until it arrives, keep its rows
+	// on the right lines (see entry.shiftOutline). UI goroutine, short.
+	w.out.shiftOutline(c)
+
 	w.mu.Lock()
 	// Cancel the parse currently in flight. Doing this while holding the
 	// same mutex used by run() to publish activeCancel closes the race
@@ -376,7 +380,10 @@ func (w *Worker) applyChange(ctx context.Context, c editbuffer.Change) bool {
 	if !ok {
 		w.desynced = true
 		// avoid showing highlighting for a now-wrong tree
-		w.dispatchUI(func() { w.out.setSpans(w, nil) })
+		w.dispatchUI(func() {
+			w.out.setSpans(w, nil)
+			w.out.setOutline(w, nil)
+		})
 		return false
 	}
 
@@ -397,6 +404,11 @@ func (w *Worker) applyChange(ctx context.Context, c editbuffer.Change) bool {
 func (w *Worker) publish() {
 	spans := append([]highlight.Span(nil), w.parser.Spans()...)
 	w.dispatchUI(func() { w.out.setSpans(w, spans) })
+
+	if op, ok := w.parser.(OutlineProvider); ok {
+		scopes := append([]Scope(nil), op.Outline()...)
+		w.dispatchUI(func() { w.out.setOutline(w, scopes) })
+	}
 }
 
 func (w *Worker) dispatchUI(fn func()) {

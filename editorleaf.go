@@ -125,6 +125,11 @@ type Editorleaf struct {
 
 	bsArray BoundariesArray // boundaries array of logical row
 
+	// Sticky Scroll (sticky.go). stickyDrawing is true while its rows are
+	// painted: setCellInEditArea / fillInEditArea then use its background.
+	sticky        stickyState
+	stickyDrawing bool
+
 	keyDispatcher *keychord.RootNode
 
 	lineNumberWidth int
@@ -155,8 +160,15 @@ func (e *Editorleaf) SetKeyDispatcher(km *keychord.RootNode) {
 	e.keyDispatcher = km
 }
 
+// lastEditedEditor is the editor (not a minibuffer) that got keys last. A
+// request to open a file from another pane (the explorer) is handled by it.
+var lastEditedEditor *Editorleaf
+
 func (e *Editorleaf) DispatchKey(ev tcell.EventKey) (string, keychord.KeyDispatchTransition) {
 	// gelog.Info("e.keyDispatcher")
+	if e.mode == ModeEditor {
+		lastEditedEditor = e
+	}
 	if e.keyDispatcher == nil {
 		// gelog.Info("e.keyDispatcher == nil")
 		return "", keychord.DispatchNotFound
@@ -606,6 +618,9 @@ func (e *Editorleaf) setCellInEditArea(x, y int, style tcell.Style, ch rune, chW
 	px := x + e.editArea.X + e.lineNumberWidth
 
 	style = e.cursorLineStyle(x, y, chWidth, style)
+	if e.stickyDrawing {
+		style = style.Background(stickyBackground)
+	}
 
 	e.screen.SetContent(px, y+e.editArea.Y, ch, nil, style)
 	// Wide char and Tab
@@ -637,6 +652,10 @@ func (e *Editorleaf) fillInEditArea(
 	}
 
 	columnLimit := (*e.editBuffer.GetLangMode()).RecommendedColumnWidth()
+
+	if e.stickyDrawing {
+		style = style.Background(stickyBackground)
+	}
 
 	// screen absolute position
 	screenX := rect.X + e.editArea.X + e.lineNumberWidth
@@ -912,6 +931,8 @@ func (e *Editorleaf) drawEditorleaf(ctx context.Context) bool {
 	e.meta.ScreenPos.Col, e.meta.ScreenPos.Row = Lcx, Cy
 	// hangingIndentWidth := e.bsArray.GetHangingIndentWidth(rowIndex)
 	e.drawCursorAt(e.meta.ScreenPos.Col, e.meta.ScreenPos.Row)
+
+	e.drawSticky(ctx) // Sticky Scroll rows over the top (sticky.go)
 
 	// Calculate the number of cursor digits to display on the mode line
 	e.meta.ModelineCx = Lcx + 1
@@ -1773,6 +1794,11 @@ func (e *Editorleaf) drawLineNumber(rowIndex, startScreenY, cursorLineY int, h i
 		if startScreenY < 0 {
 			y = e.editArea.Y
 			h += startScreenY
+		}
+		// Not below the edit area (a wrapped row at its bottom edge; the
+		// one row area of Sticky Scroll).
+		if over := y + h - (e.editArea.Y + e.editArea.Height); over > 0 {
+			h -= over
 		}
 		e.screen.FillRect(screen.Rect{X: e.editArea.X, Y: y,
 			Width:  e.lineNumberWidth,

@@ -89,20 +89,27 @@ func (l *LeafType) CancelManager() *gecore.EventCancelManager {
 	return l.ctx.CancelManager // .Get("draw")
 }
 
-// DispatchLeafRequest handles requests routed to the editor leaf type. OpenRequest is
-// delivered to the first Editorleaf found in the tree; destination,
-// behavior, and flag do not currently affect selection.
+// DispatchLeafRequest handles requests routed to the editor leaf type. The
+// request is delivered to the Editorleaf that got keys last, when it is shown
+// in the displayed RootTree, and otherwise to the first Editorleaf found in
+// the tree; destination, behavior, and flag do not currently affect selection.
+// After an OpenRequest that editor becomes the active leaf.
 func (l *LeafType) DispatchLeafRequest(destination, behavior string, flag tree.OpenerFlag, data any, f func(bool, error)) {
 
 	var e *Editorleaf
-	tree.ForEachLeafAll(func(leaf tree.Leaf) bool {
-		editor, ok := leaf.(*Editorleaf)
-		if ok {
-			e = editor
-			return false // 打ちきり
-		}
-		return true
-	})
+	if le := lastEditedEditor; le != nil && tree.TreeOfLeaf(le) != nil {
+		e = le
+	}
+	if e == nil {
+		tree.ForEachLeafAll(func(leaf tree.Leaf) bool {
+			editor, ok := leaf.(*Editorleaf)
+			if ok {
+				e = editor
+				return false // 打ちきり
+			}
+			return true
+		})
+	}
 
 	if e == nil {
 		f(false, nil)
@@ -112,6 +119,10 @@ func (l *LeafType) DispatchLeafRequest(destination, behavior string, flag tree.O
 	switch req := data.(type) {
 	case tree.OpenRequest:
 		handled, err := e.openTarget(req)
+		// The editor that shows the file gets the keys from now on.
+		if tr := tree.TreeOfLeaf(e); tr != nil {
+			tree.SetActiveTree(tr)
+		}
 		f(handled, err)
 	case tree.ReplaceRequest:
 		// The dispatcher does not hand errors back to the sender, so they

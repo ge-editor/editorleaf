@@ -42,16 +42,6 @@ func (rs Rows_) CloneRows() Rows_ {
 	return cloned
 }
 
-/* func (rs Rows_) Reversed() Rows_ {
-	result := make(Rows_, len(rs))
-
-	for i := range rs {
-		result[len(rs)-1-i] = utils.ReverseUTF8Bytes(rs[i])
-	}
-
-	return result
-} */
-
 // setBytesArray replaces the current rows from [][]byte.
 // Line separators are removed from each row.
 func (rs *Rows_) setBytesArray(source [][]byte) {
@@ -172,7 +162,6 @@ func (rs Rows_) Joined(r Rows_) Rows_ {
 // delete rows[col1:col2]
 func (rs *Rows_) Delete(col1, col2 int) {
 	*rs = slices.Delete(*rs, col1, col2)
-	// return slices.Delete(*r, col1, col2)
 }
 
 // InsertRow inserts a new line at the specified index
